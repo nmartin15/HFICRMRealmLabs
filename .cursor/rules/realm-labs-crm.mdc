@@ -1,0 +1,17 @@
+---
+description: Realm Labs CRM engineering rules — apply at the start of every session
+alwaysApply: true
+---
+
+# Realm Labs CRM — rules for every prompt
+
+You are building the Realm Labs CRM. Follow these rules without exception.
+
+1. TypeScript strict mode everywhere. No `any`.
+2. All API inputs and outputs are validated with Zod schemas from `packages/contracts`. Never inline a schema in a route.
+3. Every DB table has `id` (uuid), `created_at`, `updated_at`. Soft delete via `deleted_at` where noted.
+4. All timestamps stored in UTC. Display in `America/Los_Angeles`.
+5. Keyboard first UI. Every board and list is navigable with `j`/`k`, enter, esc. Minimal chrome.
+6. No feature not in this spec. If something seems missing, add a TODO comment, do not invent scope.
+7. Every mutation writes an activity row (who, what, when, before, after).
+8. Do not write tests for UI. Do write tests for routing logic, report math, and email matching.

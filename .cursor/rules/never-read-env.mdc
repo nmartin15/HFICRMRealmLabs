@@ -1,0 +1,14 @@
+---
+description: Never read .env or other secret env files
+alwaysApply: true
+---
+
+# Never read .env
+
+Do not open, read, grep, search, or otherwise inspect `.env` or secret env files (`.env.local`, `.env.*.local`, `.env.production`, `.env.development`).
+
+- Do not use Read, Grep, Glob, or Shell to view their contents.
+- Infer required variable *names* from `.env.example` and from code (`env.ts`, `process.env`).
+- If a value from `.env` is needed, ask the user. Never quote or repeat secrets.
+
+`.env.example` is allowed. It must not contain real secrets.
