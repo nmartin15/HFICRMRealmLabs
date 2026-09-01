@@ -15,8 +15,6 @@ import {
   type IncubatorTier,
 } from "./tiers";
 
-export const NURTURE_FOLLOW_UP_DAYS = 90;
-
 export const decideBodySchema = z.object({
   decision: allocationDecisionSchema,
   passReason: z.string().optional(),
@@ -24,8 +22,6 @@ export const decideBodySchema = z.object({
   tier: incubatorTierSchema.optional(),
   priceUsd: z.number().int().optional(),
   routingDetail: z.string().optional(),
-  nurture: z.boolean().optional(),
-  nurtureFollowUpAt: isoDateSchema.optional(),
 });
 export type DecideBody = z.infer<typeof decideBodySchema>;
 
@@ -35,11 +31,6 @@ export const decideInputSchema = decideBodySchema.extend({
   today: isoDateSchema,
 });
 export type DecideInput = z.infer<typeof decideInputSchema>;
-
-export const nurtureRouteBodySchema = decideBodySchema.omit({
-  decision: true,
-});
-export type NurtureRouteBody = z.infer<typeof nurtureRouteBodySchema>;
 
 export type DecideError = {
   ok: false;
@@ -58,7 +49,7 @@ export type DecideSuccess = {
   };
   person: { doNotContact: true } | null;
   incubator: {
-    stage: "routed";
+    stage: "sent";
     tier: IncubatorTierName | null;
     priceUsd: number | null;
     routingDetail: string | null;
@@ -89,10 +80,6 @@ export function addCalendarDays(isoDate: string, days: number): string {
   const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(date.getUTCDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
-}
-
-export function defaultNurtureFollowUpAt(today: string): string {
-  return addCalendarDays(today, NURTURE_FOLLOW_UP_DAYS);
 }
 
 export function todayIsoInDisplayZone(now: Date): string {
@@ -180,7 +167,7 @@ export function decide(input: DecideInput): DecideResult {
       },
       person: null,
       incubator: {
-        stage: "routed",
+        stage: "sent",
         tier: input.tier ?? null,
         priceUsd: price.priceUsd,
         routingDetail: trimmed(input.routingDetail),
@@ -191,41 +178,12 @@ export function decide(input: DecideInput): DecideResult {
   const doNotContact = input.doNotContact === true;
   const passReason = trimmed(input.passReason);
 
-  if (doNotContact) {
-    if (!passReason) {
-      return fail(
-        400,
-        "PASS_REASON_REQUIRED",
-        "pass_reason is required when doNotContact is true",
-      );
-    }
-    return {
-      ok: true,
-      allocation: {
-        stage: "passed",
-        decision: "pass",
-        passReason,
-        nurtureFollowUpAt: null,
-      },
-      person: { doNotContact: true },
-      incubator: null,
-    };
-  }
-
-  const nurture = input.nurture !== false;
-  if (nurture) {
-    return {
-      ok: true,
-      allocation: {
-        stage: "nurture",
-        decision: "pass",
-        passReason,
-        nurtureFollowUpAt:
-          input.nurtureFollowUpAt ?? defaultNurtureFollowUpAt(input.today),
-      },
-      person: null,
-      incubator: null,
-    };
+  if (doNotContact && !passReason) {
+    return fail(
+      400,
+      "PASS_REASON_REQUIRED",
+      "pass_reason is required when doNotContact is true",
+    );
   }
 
   return {
@@ -236,13 +194,9 @@ export function decide(input: DecideInput): DecideResult {
       passReason,
       nurtureFollowUpAt: null,
     },
-    person: null,
+    person: doNotContact ? { doNotContact: true } : null,
     incubator: null,
   };
-}
-
-export function canReopenFromNurture(stage: AllocationStage): boolean {
-  return stage === "nurture";
 }
 
 export function isOnAllocationBoard(decision: AllocationDecision | null): boolean {

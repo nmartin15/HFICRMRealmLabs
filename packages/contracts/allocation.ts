@@ -1,4 +1,10 @@
-import type { AllocationStage, IncubatorStage } from "./enums";
+import type {
+  AllocationStage,
+  BudgetQualified,
+  IncubatorStage,
+  LeadTemp,
+  ProgramTrack,
+} from "./enums";
 
 export const ALLOCATION_OPEN_STAGES = [
   "applied",
@@ -26,13 +32,31 @@ export const ALLOCATION_STAGE_LABELS: Record<AllocationStage, string> = {
 };
 
 export const INCUBATOR_STAGE_LABELS: Record<IncubatorStage, string> = {
-  routed: "Routed",
-  application_sent: "Application Sent",
-  application_received: "Application Received",
-  offer_made: "Offer Made",
-  paid: "Paid",
-  enrolled: "Enrolled",
-  closed: "Closed",
+  sent: "Sent",
+  applied: "Applied",
+  approved: "Approved",
+  rejected: "Rejected",
+};
+
+export const PROGRAM_TRACK_LABELS: Record<ProgramTrack, string> = {
+  allocation: "Allocation",
+  incubator: "Incubator",
+  recruitment: "Recruitment",
+  capital_raising: "Capital Raising",
+};
+
+export const BUDGET_QUALIFIED_LABELS: Record<BudgetQualified, string> = {
+  light: "Light",
+  heavy: "Heavy",
+  not_qualified: "False",
+  unknown: "Unknown",
+};
+
+export const LEAD_TEMP_LABELS: Record<LeadTemp, string> = {
+  cold: "Cold",
+  lukewarm: "Lukewarm",
+  warm: "Warm",
+  hot: "Hot",
 };
 
 export const ALLOCATION_BOARD_HREF = "/allocation" as const;
@@ -98,17 +122,22 @@ export type PersonBoardBadge =
     };
 
 export function currentBoardBadge(input: {
+  programTrack: ProgramTrack | null;
+  doNotContact: boolean;
   allocationStage: AllocationStage | null;
   incubatorStage: IncubatorStage | null;
 }): PersonBoardBadge | null {
-  if (input.incubatorStage && input.incubatorStage !== "closed") {
+  if (input.doNotContact) {
+    return null;
+  }
+  if (input.programTrack === "incubator" && input.incubatorStage) {
     return {
       board: "incubator",
       stage: input.incubatorStage,
       href: INCUBATOR_BOARD_HREF,
     };
   }
-  if (input.allocationStage) {
+  if (input.programTrack === "allocation" && input.allocationStage) {
     return {
       board: "allocation",
       stage: input.allocationStage,

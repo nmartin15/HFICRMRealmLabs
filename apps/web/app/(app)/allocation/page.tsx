@@ -12,15 +12,18 @@ import {
   ALLOCATION_CLOSED_STAGES,
   ALLOCATION_OPEN_STAGES,
   ALLOCATION_STAGE_LABELS,
+  BUDGET_QUALIFIED_LABELS,
+  TASK_KIND_LABELS,
   personDisplayName,
 } from "@realm-labs/contracts";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { isTypingTarget } from "@/hooks/use-list-navigation";
+import { ApplicantDialog } from "@/components/applicant-dialog";
 import { DecisionDialog } from "@/components/decision-dialog";
 import { LeadTempDot } from "@/components/lead-temp-dot";
-import { MeetingOutcomeButtons } from "@/components/meeting-outcome-buttons";
 import { NoteDialog } from "@/components/note-dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 type ClosedFilter = "all" | AllocationClosedStage;
@@ -36,6 +39,7 @@ export default function AllocationBoardPage() {
     null,
   );
   const [noteCard, setNoteCard] = useState<AllocationBoardCard | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [closedOpen, setClosedOpen] = useState(false);
   const [closedFilter, setClosedFilter] = useState<ClosedFilter>("all");
 
@@ -76,7 +80,7 @@ export default function AllocationBoardPage() {
     });
   }, [columnIndex, columns]);
 
-  const dialogOpen = Boolean(decisionCard || noteCard);
+  const dialogOpen = Boolean(decisionCard || noteCard || createOpen);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -123,6 +127,10 @@ export default function AllocationBoardPage() {
       if (event.key === "n" && focusedCard) {
         event.preventDefault();
         setNoteCard(focusedCard);
+      }
+      if (event.key === "c") {
+        event.preventDefault();
+        setCreateOpen(true);
       }
     }
 
@@ -185,11 +193,16 @@ export default function AllocationBoardPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-medium tracking-tight">Allocation</h1>
-        <p className="text-xs text-muted-foreground">
-          j/k cards · h/l columns · enter record · d decision · n note
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-medium tracking-tight">Allocation</h1>
+          <p className="text-xs text-muted-foreground">
+            j/k cards · h/l columns · enter record · d decision · n note · c new
+          </p>
+        </div>
+        <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
+          New applicant
+        </Button>
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -240,7 +253,6 @@ export default function AllocationBoardPage() {
                     )
                   }
                   onSendAppLink={() => void sendAppLink(card)}
-                  onMeetingUpdated={() => void load()}
                 />
               ))}
             </ul>
@@ -269,11 +281,13 @@ export default function AllocationBoardPage() {
               }
             >
               <option value="all">All</option>
-              {ALLOCATION_CLOSED_STAGES.map((stage) => (
-                <option key={stage} value={stage}>
-                  {ALLOCATION_STAGE_LABELS[stage]}
-                </option>
-              ))}
+              {ALLOCATION_CLOSED_STAGES.filter((stage) => stage !== "nurture").map(
+                (stage) => (
+                  <option key={stage} value={stage}>
+                    {ALLOCATION_STAGE_LABELS[stage]}
+                  </option>
+                ),
+              )}
             </select>
           </label>
           {closedCards.length === 0 ? (
@@ -302,6 +316,20 @@ export default function AllocationBoardPage() {
         </div>
       </details>
 
+      <ApplicantDialog
+        open={createOpen}
+        pipeline="allocation"
+        onClose={() => setCreateOpen(false)}
+        onCreated={async (created) => {
+          const next = await api<AllocationBoardResponse>("/allocation");
+          setBoard(next);
+          const idx = next.columns.applied.findIndex(
+            (item) => item.card.id === created.cardId,
+          );
+          setColumnIndex(0);
+          setCardIndex(idx < 0 ? 0 : idx);
+        }}
+      />
       <DecisionDialog
         open={Boolean(decisionCard)}
         personName={
@@ -345,7 +373,6 @@ function AllocationCardView({
   onOpen,
   onToggleMenu,
   onSendAppLink,
-  onMeetingUpdated,
 }: {
   card: AllocationBoardCard;
   focused: boolean;
@@ -354,7 +381,6 @@ function AllocationCardView({
   onOpen: () => void;
   onToggleMenu: () => void;
   onSendAppLink: () => void;
-  onMeetingUpdated: () => void;
 }) {
   const showSend = card.card.stage === "contacted";
 
@@ -417,24 +443,19 @@ function AllocationCardView({
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
           <LeadTempDot temp={card.person.leadTemp} />
-          <span className="rounded-full border px-1.5 py-0.5 uppercase">
-            {card.person.budgetQualified}
+          <span className="rounded-full border px-1.5 py-0.5">
+            {BUDGET_QUALIFIED_LABELS[card.person.budgetQualified]}
           </span>
           <span className="text-muted-foreground">{card.daysInStage}d</span>
-          {card.nextMeetingAt ? (
+          {card.nextTaskAt ? (
             <span className="text-muted-foreground">
-              next {formatDate(card.nextMeetingAt)}
+              {card.nextTaskKind
+                ? `${TASK_KIND_LABELS[card.nextTaskKind]} · `
+                : ""}
+              next {formatDate(card.nextTaskAt)}
             </span>
           ) : null}
         </div>
-        {card.nextMeetingId ? (
-          <div className="mt-2">
-            <MeetingOutcomeButtons
-              meetingId={card.nextMeetingId}
-              onUpdated={onMeetingUpdated}
-            />
-          </div>
-        ) : null}
       </article>
     </li>
   );

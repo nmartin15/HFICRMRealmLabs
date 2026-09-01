@@ -143,6 +143,88 @@ describe("spreadsheet parsing", () => {
     expect(row?.errors).toEqual([]);
   });
 
+  it("parses the live applicant sheet headers and meeting/activity cells", () => {
+    const header = [
+      "Name",
+      "Title",
+      "Company",
+      "Location",
+      "Email",
+      "Source",
+      "Resume Link",
+      "Application Date",
+      "Notes",
+      "Activity",
+      "Preliminary Questions",
+      "1 Meeting",
+      "Output",
+      "Notes from 1 meeting",
+      "Follow Up After 1 Meeting",
+      "2 Meeting",
+      "Notes",
+      "Budget Qualified",
+      "Lead Temp",
+      "Incubator Status",
+      "Incubator Ref",
+      "Incubator Result",
+      "Routing Detail",
+      "Application Follow Up",
+      "Passed",
+      "Closed",
+      "No close reason",
+      "Rejection (Don't contact again)",
+      "Rejection Reason",
+    ].join("\t");
+    const row = [
+      "Jane Doe",
+      "Quantitative Researcher",
+      "",
+      "Paris, France",
+      "jane.sheet@example.com",
+      "Workable",
+      "https://example.com/resume",
+      "2026-08-13",
+      "",
+      "Contacted 2026-08-18",
+      "",
+      "Meeting 2026-08-24 6pm PT",
+      "rescheduled with notice",
+      "Sent track record questions",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ].join("\t");
+    const parsed = parseImportFile("applicants.tsv", `${header}\n${row}`);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    const [mapped] = mapImportRecords(parsed.records);
+    expect(mapped?.errors).toEqual([]);
+    expect(mapped?.person?.email).toBe("jane.sheet@example.com");
+    expect(mapped?.contacted).toBe(true);
+    expect(mapped?.tasks).toEqual([
+      {
+        kind: "meeting",
+        dueAt: "2026-08-25T01:00:00.000Z",
+        notes: "Sent track record questions",
+        status: "rescheduled",
+      },
+    ]);
+  });
+
   it("rejects a file missing Name or Email headers", () => {
     expect(parseImportFile("x.csv", "Title,Email\nX,a@b.com").ok).toBe(false);
     expect(parseImportFile("x.csv", "Name,Title\nJane Doe,X").ok).toBe(false);
@@ -168,7 +250,7 @@ describe("field mapping", () => {
     expect(row?.person?.email).toBe("jane@x.com");
     expect(mapPersonSource("LinkedIn")).toBe("linkedin");
     expect(mapPersonSource("Workable")).toBe("workable");
-    expect(mapPersonSource("Referral")).toBe("other");
+    expect(mapPersonSource("Referral")).toBe("referral");
     expect(row?.person?.source).toBe("workable");
   });
 
@@ -186,13 +268,13 @@ describe("field mapping", () => {
     const [blank] = mappedFromCsv(
       csv([{ Name: "John Smith", Email: "john@x.com" }]),
     );
-    expect(yesHot?.person?.budgetQualified).toBe("yes");
+    expect(yesHot?.person?.budgetQualified).toBe("light");
     expect(yesHot?.person?.leadTemp).toBe("hot");
     expect(blank?.person?.budgetQualified).toBe("unknown");
     expect(blank?.person?.leadTemp).toBeNull();
   });
 
-  it("sets contacted from Activity like Contacted 2026-08-18", () => {
+  it("stores Activity as a timeline note without marking contacted", () => {
     const [row] = mappedFromCsv(
       csv([
         {
@@ -202,7 +284,7 @@ describe("field mapping", () => {
         },
       ]),
     );
-    expect(row?.contacted).toBe(true);
+    expect(row?.contacted).toBe(false);
     expect(row?.activity?.occurredAt).toBe("2026-08-18T07:00:00.000Z");
     expect(startOfDayIso({ year: 2026, month: 8, day: 18 })).toBe(
       "2026-08-18T07:00:00.000Z",
@@ -225,9 +307,19 @@ describe("field mapping", () => {
         },
       ]),
     );
-    expect(row?.meetings).toEqual([
-      { scheduledAt: "2026-08-31T18:00:00.000Z" },
-      { scheduledAt: "2026-09-02T21:30:00.000Z" },
+    expect(row?.tasks).toEqual([
+      {
+        kind: "meeting",
+        dueAt: "2026-08-31T18:00:00.000Z",
+        notes: null,
+        status: "open",
+      },
+      {
+        kind: "meeting",
+        dueAt: "2026-09-02T21:30:00.000Z",
+        notes: null,
+        status: "open",
+      },
     ]);
   });
 
@@ -250,6 +342,7 @@ describe("field mapping", () => {
     expect(row?.incubator.closeReason).toBe("Withdrew");
     expect(hasIncubatorImportSignal(row?.incubator ?? {
       statusRoutedAt: null,
+      statusStage: null,
       applicationRef: null,
       applicationResult: null,
       routingDetail: null,
@@ -390,8 +483,8 @@ describe("allocation and incubator planning", () => {
       rejection: false,
       rejectionReason: null,
     });
-    expect(allocated.stage).toBe("allocated");
-    expect(allocated.decision).toBe("allocate");
+    expect(allocated.stage).toBe("passed");
+    expect(allocated.decision).toBe("pass");
 
     const rejected = planImportAllocation({
       existingStage: "applied",
@@ -416,6 +509,7 @@ describe("allocation and incubator planning", () => {
       null,
       {
         statusRoutedAt: "2026-08-23T07:00:00.000Z",
+        statusStage: "sent",
         applicationRef: null,
         applicationResult: null,
         routingDetail: "warm intro",
@@ -424,7 +518,7 @@ describe("allocation and incubator planning", () => {
       },
       "2026-08-24T00:00:00.000Z",
     );
-    expect(sent?.stage).toBe("application_sent");
+    expect(sent?.stage).toBe("sent");
     expect(sent?.routedAt).toBe("2026-08-23T07:00:00.000Z");
     expect(sent?.routingDetail).toBe("warm intro");
 
@@ -432,6 +526,7 @@ describe("allocation and incubator planning", () => {
       sent,
       {
         statusRoutedAt: "2026-08-23T07:00:00.000Z",
+        statusStage: "sent",
         applicationRef: "APP-9",
         applicationResult: "ok",
         routingDetail: null,
@@ -440,7 +535,7 @@ describe("allocation and incubator planning", () => {
       },
       "2026-08-24T00:00:00.000Z",
     );
-    expect(received?.stage).toBe("application_received");
+    expect(received?.stage).toBe("applied");
     expect(received?.applicationRef).toBe("APP-9");
     expect(received?.routingDetail).toBe("warm intro");
 
@@ -448,6 +543,7 @@ describe("allocation and incubator planning", () => {
       received,
       {
         statusRoutedAt: null,
+        statusStage: null,
         applicationRef: null,
         applicationResult: null,
         routingDetail: null,
@@ -456,7 +552,7 @@ describe("allocation and incubator planning", () => {
       },
       "2026-08-24T00:00:00.000Z",
     );
-    expect(closed?.stage).toBe("closed");
+    expect(closed?.stage).toBe("rejected");
     expect(closed?.closeReason).toBe("Withdrew");
     expect(closed?.closedAt).toBe("2026-08-24T00:00:00.000Z");
   });
@@ -467,7 +563,7 @@ describe("update blank fields only", () => {
     const existing: ImportPersonFields = {
       ...blankPerson,
       title: "Engineer",
-      budgetQualified: "yes",
+      budgetQualified: "light",
       leadTemp: "warm",
     };
     const incoming: ImportPersonFields = {
@@ -477,7 +573,7 @@ describe("update blank fields only", () => {
       title: "CEO",
       company: "Acme",
       source: "linkedin",
-      budgetQualified: "no",
+      budgetQualified: "not_qualified",
       leadTemp: "hot",
       notes: "hello",
     };
@@ -487,7 +583,7 @@ describe("update blank fields only", () => {
     expect(merged.title).toBe("Engineer");
     expect(merged.company).toBe("Acme");
     expect(merged.source).toBe("other");
-    expect(merged.budgetQualified).toBe("yes");
+    expect(merged.budgetQualified).toBe("light");
     expect(merged.leadTemp).toBe("warm");
     expect(merged.notes).toBe("hello");
   });
@@ -495,8 +591,8 @@ describe("update blank fields only", () => {
   it("treats unknown budget qualified as blank", () => {
     const merged = fillBlankPersonFields(blankPerson, {
       ...blankPerson,
-      budgetQualified: "yes",
+      budgetQualified: "light",
     });
-    expect(merged.budgetQualified).toBe("yes");
+    expect(merged.budgetQualified).toBe("light");
   });
 });

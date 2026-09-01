@@ -80,7 +80,7 @@ export function ApplicationRefDialog({
   return (
     <DialogShell
       open={open}
-      title="Application received"
+      title="Applied"
       personName={personName}
       onClose={onClose}
     >
@@ -309,7 +309,7 @@ export function CloseReasonDialog({
   return (
     <DialogShell
       open={open}
-      title="Close"
+      title="Reject"
       personName={personName}
       onClose={onClose}
     >
@@ -328,7 +328,7 @@ export function CloseReasonDialog({
         }}
       >
         <div className="space-y-1">
-          <Label htmlFor="closeReason">Close reason</Label>
+          <Label htmlFor="closeReason">Reason</Label>
           <textarea
             id="closeReason"
             required
@@ -343,7 +343,7 @@ export function CloseReasonDialog({
             Cancel
           </Button>
           <Button type="submit" size="sm" disabled={saving || !value.trim()}>
-            Close card
+            Reject
           </Button>
         </div>
       </form>

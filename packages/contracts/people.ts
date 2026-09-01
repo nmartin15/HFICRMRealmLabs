@@ -13,8 +13,10 @@ import {
   isoDateTimeSchema,
   leadTempSchema,
   personSourceSchema,
+  programTrackSchema,
   uuidSchema,
 } from "./enums";
+import { taskSchema } from "./tasks";
 import { timelineItemSchema } from "./timeline";
 
 export const personSchema = z.object({
@@ -27,8 +29,11 @@ export const personSchema = z.object({
   location: z.string().nullable(),
   source: personSourceSchema,
   resumeUrl: z.url().nullable(),
+  resumeFilename: z.string().nullable(),
+  resumeContentType: z.string().nullable(),
   appliedAt: isoDateSchema.nullable(),
   notes: z.string().nullable(),
+  programTrack: programTrackSchema.nullable(),
   leadTemp: leadTempSchema.nullable(),
   budgetQualified: budgetQualifiedSchema,
   doNotContact: z.boolean(),
@@ -63,10 +68,13 @@ export const personIdParamsSchema = z.object({
 export type PersonIdParams = z.infer<typeof personIdParamsSchema>;
 
 export const personPatchSchema = z.object({
+  programTrack: programTrackSchema.nullable().optional(),
   leadTemp: leadTempSchema.nullable().optional(),
   budgetQualified: budgetQualifiedSchema.optional(),
   doNotContact: z.boolean().optional(),
   notes: z.string().nullable().optional(),
+  resumeFilename: z.string().nullable().optional(),
+  resumeContentType: z.string().nullable().optional(),
   ownerId: uuidSchema.nullable().optional(),
 });
 export type PersonPatch = z.infer<typeof personPatchSchema>;
@@ -93,6 +101,7 @@ export type PersonBoardBadgeResponse = z.infer<typeof personBoardBadgeSchema>;
 export const personDetailResponseSchema = z.object({
   person: personSchema,
   board: personBoardBadgeSchema.nullable(),
+  tasks: z.array(taskSchema),
   timeline: z.array(timelineItemSchema),
 });
 export type PersonDetailResponse = z.infer<typeof personDetailResponseSchema>;

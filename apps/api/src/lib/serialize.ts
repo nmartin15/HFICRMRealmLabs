@@ -5,6 +5,7 @@ import type {
   IncubatorCard,
   Meeting,
   Person,
+  Task,
   User,
 } from "@realm-labs/contracts";
 import {
@@ -14,6 +15,7 @@ import {
   incubatorCards,
   meetings,
   people,
+  tasks,
   users,
 } from "@realm-labs/db";
 
@@ -22,6 +24,7 @@ type PersonRow = typeof people.$inferSelect;
 type AllocationCardRow = typeof allocationCards.$inferSelect;
 type IncubatorCardRow = typeof incubatorCards.$inferSelect;
 type MeetingRow = typeof meetings.$inferSelect;
+type TaskRow = typeof tasks.$inferSelect;
 type ActivityRow = typeof activities.$inferSelect;
 type EmailThreadRow = typeof emailThreads.$inferSelect;
 
@@ -63,8 +66,11 @@ export function serializePerson(row: PersonRow): Person {
     location: row.location,
     source: row.source,
     resumeUrl: serializeResumeUrl(row.resumeUrl),
+    resumeFilename: row.resumeFilename,
+    resumeContentType: row.resumeContentType,
     appliedAt: row.appliedAt,
     notes: row.notes,
+    programTrack: row.programTrack,
     leadTemp: row.leadTemp,
     budgetQualified: row.budgetQualified,
     doNotContact: row.doNotContact,
@@ -104,6 +110,20 @@ export function serializeIncubatorCard(row: IncubatorCardRow): IncubatorCard {
     routedAt: toIso(row.routedAt),
     closeReason: row.closeReason,
     closedAt: row.closedAt ? toIso(row.closedAt) : null,
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+  };
+}
+
+export function serializeTask(row: TaskRow): Task {
+  return {
+    id: row.id,
+    personId: row.personId,
+    kind: row.kind,
+    dueAt: toIso(row.dueAt),
+    notes: row.notes,
+    status: row.status,
+    createdBy: row.createdBy,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
   };

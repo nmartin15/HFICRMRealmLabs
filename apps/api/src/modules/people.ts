@@ -3,7 +3,9 @@ import {
   canDeletePerson,
   canViewEmailThread,
   canViewPerson,
+  completeTaskBodySchema,
   createPersonNoteBodySchema,
+  createTaskBodySchema,
   currentBoardBadge,
   mergePersonTimeline,
   okResponseSchema,
@@ -14,7 +16,12 @@ import {
   personNoteResponseSchema,
   personPatchSchema,
   personSchema,
+  planCompleteTask,
+  planCreateTask,
+  taskSchema,
+  uuidSchema,
 } from "@realm-labs/contracts";
+import { z } from "zod";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import {
@@ -24,6 +31,7 @@ import {
   incubatorCards,
   meetings,
   people,
+  tasks,
   users,
   type Database,
 } from "@realm-labs/db";
@@ -34,6 +42,7 @@ import {
   serializeEmailThread,
   serializeMeeting,
   serializePerson,
+  serializeTask,
 } from "../lib/serialize.js";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
@@ -96,21 +105,26 @@ async function personTimeline(
   });
 }
 
-async function personBoard(db: Database, personId: string) {
+async function personBoard(
+  db: Database,
+  person: typeof people.$inferSelect,
+) {
   const [allocRows, incubRows] = await Promise.all([
     db
       .select()
       .from(allocationCards)
-      .where(eq(allocationCards.personId, personId))
+      .where(eq(allocationCards.personId, person.id))
       .limit(1),
     db
       .select()
       .from(incubatorCards)
-      .where(eq(incubatorCards.personId, personId))
+      .where(eq(incubatorCards.personId, person.id))
       .limit(1),
   ]);
 
   const badge = currentBoardBadge({
+    programTrack: person.programTrack,
+    doNotContact: person.doNotContact,
     allocationStage: allocRows[0]?.stage ?? null,
     incubatorStage: incubRows[0]?.stage ?? null,
   });
@@ -159,14 +173,20 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const row = await requirePerson(app.db, req.params.id);
-      const [board, timeline] = await Promise.all([
-        personBoard(app.db, row.id),
+      const [board, timeline, taskRows] = await Promise.all([
+        personBoard(app.db, row),
         personTimeline(app.db, row.id, actor.email),
+        app.db
+          .select()
+          .from(tasks)
+          .where(eq(tasks.personId, row.id))
+          .orderBy(asc(tasks.dueAt)),
       ]);
 
       return personDetailResponseSchema.parse({
         person: serializePerson(row),
         board,
+        tasks: taskRows.map((task) => serializeTask(task)),
         timeline,
       });
     },
@@ -202,10 +222,33 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       const update: {
         leadTemp?: typeof row.leadTemp;
         budgetQualified?: typeof row.budgetQualified;
+        programTrack?: typeof row.programTrack;
         doNotContact?: boolean;
         notes?: string | null;
+        resumeFilename?: string | null;
+        resumeContentType?: string | null;
         ownerId?: string | null;
       } = {};
+
+      if (
+        patch.programTrack !== undefined &&
+        patch.programTrack !== row.programTrack
+      ) {
+        if (
+          patch.programTrack === null &&
+          !row.doNotContact &&
+          (patch.doNotContact !== true)
+        ) {
+          throw httpError(
+            400,
+            "PROGRAM_TRACK_REQUIRED",
+            "Program track is required unless DNC",
+          );
+        }
+        before.programTrack = row.programTrack;
+        after.programTrack = patch.programTrack;
+        update.programTrack = patch.programTrack;
+      }
 
       if (patch.leadTemp !== undefined && patch.leadTemp !== row.leadTemp) {
         before.leadTemp = row.leadTemp;
@@ -227,11 +270,32 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         before.doNotContact = row.doNotContact;
         after.doNotContact = patch.doNotContact;
         update.doNotContact = patch.doNotContact;
+        if (patch.doNotContact) {
+          before.programTrack = row.programTrack;
+          after.programTrack = null;
+          update.programTrack = null;
+        }
       }
       if (patch.notes !== undefined && patch.notes !== row.notes) {
         before.notes = row.notes;
         after.notes = patch.notes;
         update.notes = patch.notes;
+      }
+      if (
+        patch.resumeFilename !== undefined &&
+        patch.resumeFilename !== row.resumeFilename
+      ) {
+        before.resumeFilename = row.resumeFilename;
+        after.resumeFilename = patch.resumeFilename;
+        update.resumeFilename = patch.resumeFilename;
+      }
+      if (
+        patch.resumeContentType !== undefined &&
+        patch.resumeContentType !== row.resumeContentType
+      ) {
+        before.resumeContentType = row.resumeContentType;
+        after.resumeContentType = patch.resumeContentType;
+        update.resumeContentType = patch.resumeContentType;
       }
       if (patch.ownerId !== undefined && patch.ownerId !== row.ownerId) {
         before.ownerId = row.ownerId;
@@ -266,6 +330,34 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       });
 
+      if (updated.programTrack === "allocation") {
+        const existingAlloc = await app.db
+          .select({ id: allocationCards.id })
+          .from(allocationCards)
+          .where(eq(allocationCards.personId, updated.id))
+          .limit(1);
+        if (!existingAlloc[0]) {
+          await app.db.insert(allocationCards).values({
+            personId: updated.id,
+            stage: "applied",
+          });
+        }
+      }
+      if (updated.programTrack === "incubator") {
+        const existingIncub = await app.db
+          .select({ id: incubatorCards.id })
+          .from(incubatorCards)
+          .where(eq(incubatorCards.personId, updated.id))
+          .limit(1);
+        if (!existingIncub[0]) {
+          await app.db.insert(incubatorCards).values({
+            personId: updated.id,
+            stage: "sent",
+            routedAt: when,
+          });
+        }
+      }
+
       return personSchema.parse(serializePerson(updated));
     },
   );
@@ -297,6 +389,149 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       });
 
       return personNoteResponseSchema.parse(serializeActivity(note));
+    },
+  );
+
+  app.post(
+    "/people/:id/tasks",
+    {
+      schema: {
+        params: personIdParamsSchema,
+        body: createTaskBodySchema,
+        response: { 200: taskSchema },
+      },
+    },
+    async (req) => {
+      const actor = requireUser(req);
+      const row = await requirePerson(app.db, req.params.id);
+      const plan = planCreateTask({
+        kind: req.body.kind,
+        notes: req.body.notes,
+        personDoNotContact: row.doNotContact,
+        personDeleted: Boolean(row.deletedAt),
+      });
+      if (!plan.ok) {
+        throw httpError(plan.status, plan.code, plan.message);
+      }
+
+      const [created] = await app.db
+        .insert(tasks)
+        .values({
+          personId: row.id,
+          kind: plan.kind,
+          dueAt: new Date(req.body.dueAt),
+          notes: plan.notes,
+          status: plan.kind === "dnc" ? "done" : "open",
+          createdBy: actor.id,
+        })
+        .returning();
+      if (!created) {
+        throw httpError(500, "INTERNAL", "Failed to create task");
+      }
+
+      const when = new Date();
+      if (plan.setDoNotContact && !row.doNotContact) {
+        await app.db
+          .update(people)
+          .set({ doNotContact: true, programTrack: null })
+          .where(eq(people.id, row.id));
+      }
+      await writeActivity(app.db, {
+        personId: row.id,
+        userId: actor.id,
+        type: "note",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "task.create",
+          when: when.toISOString(),
+          before: null,
+          after: {
+            kind: created.kind,
+            notes: created.notes,
+            dueAt: created.dueAt.toISOString(),
+          },
+        },
+      });
+      return taskSchema.parse(serializeTask(created));
+    },
+  );
+
+  app.post(
+    "/people/:id/tasks/:taskId/complete",
+    {
+      schema: {
+        params: z.object({ id: uuidSchema, taskId: uuidSchema }),
+        body: completeTaskBodySchema,
+        response: { 200: taskSchema },
+      },
+    },
+    async (req) => {
+      const actor = requireUser(req);
+      const row = await requirePerson(app.db, req.params.id);
+      const existing = await app.db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.id, req.params.taskId), eq(tasks.personId, row.id)))
+        .limit(1);
+      const current = existing[0];
+      if (!current) {
+        throw httpError(404, "NOT_FOUND", "Task not found");
+      }
+      const plan = planCompleteTask({
+        currentKind: current.kind,
+        currentStatus: current.status,
+        notes: req.body.notes ?? current.notes,
+        next: req.body.next,
+        personDoNotContact: row.doNotContact,
+        personDeleted: Boolean(row.deletedAt),
+      });
+      if (!plan.ok) {
+        throw httpError(plan.status, plan.code, plan.message);
+      }
+
+      const [updated] = await app.db
+        .update(tasks)
+        .set({
+          status: "done",
+          notes: plan.notes,
+        })
+        .where(eq(tasks.id, current.id))
+        .returning();
+      if (!updated) {
+        throw httpError(500, "INTERNAL", "Failed to complete task");
+      }
+
+      if (plan.next) {
+        await app.db.insert(tasks).values({
+          personId: row.id,
+          kind: plan.next.kind,
+          dueAt: new Date(plan.next.dueAt),
+          notes: plan.next.notes,
+          status: plan.next.kind === "dnc" ? "done" : "open",
+          createdBy: actor.id,
+        });
+      }
+      if (plan.setDoNotContact && !row.doNotContact) {
+        await app.db
+          .update(people)
+          .set({ doNotContact: true, programTrack: null })
+          .where(eq(people.id, row.id));
+      }
+
+      const when = new Date();
+      await writeActivity(app.db, {
+        personId: row.id,
+        userId: actor.id,
+        type: "note",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "task.complete",
+          when: when.toISOString(),
+          before: { status: current.status },
+          after: { status: "done", notes: plan.notes },
+        },
+      });
+      return taskSchema.parse(serializeTask(updated));
     },
   );
 

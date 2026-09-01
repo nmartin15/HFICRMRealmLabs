@@ -11,10 +11,23 @@ export const personSourceSchema = z.enum([
 ]);
 export type PersonSource = z.infer<typeof personSourceSchema>;
 
-export const leadTempSchema = z.enum(["hot", "warm", "cold"]);
+export const programTrackSchema = z.enum([
+  "allocation",
+  "incubator",
+  "recruitment",
+  "capital_raising",
+]);
+export type ProgramTrack = z.infer<typeof programTrackSchema>;
+
+export const leadTempSchema = z.enum(["cold", "lukewarm", "warm", "hot"]);
 export type LeadTemp = z.infer<typeof leadTempSchema>;
 
-export const budgetQualifiedSchema = z.enum(["yes", "no", "unknown"]);
+export const budgetQualifiedSchema = z.enum([
+  "light",
+  "heavy",
+  "not_qualified",
+  "unknown",
+]);
 export type BudgetQualified = z.infer<typeof budgetQualifiedSchema>;
 
 export const allocationStageSchema = z.enum([
@@ -36,13 +49,10 @@ export const allocationDecisionSchema = z.enum([
 export type AllocationDecision = z.infer<typeof allocationDecisionSchema>;
 
 export const incubatorStageSchema = z.enum([
-  "routed",
-  "application_sent",
-  "application_received",
-  "offer_made",
-  "paid",
-  "enrolled",
-  "closed",
+  "sent",
+  "applied",
+  "approved",
+  "rejected",
 ]);
 export type IncubatorStage = z.infer<typeof incubatorStageSchema>;
 
@@ -53,6 +63,12 @@ export const incubatorTierSchema = z.enum([
   "tier_4",
 ]);
 export type IncubatorTierName = z.infer<typeof incubatorTierSchema>;
+
+export const taskKindSchema = z.enum(["email", "call", "meeting", "dnc"]);
+export type TaskKind = z.infer<typeof taskKindSchema>;
+
+export const taskStatusSchema = z.enum(["open", "done", "rescheduled"]);
+export type TaskStatus = z.infer<typeof taskStatusSchema>;
 
 export const meetingOutcomeSchema = z.enum([
   "scheduled",

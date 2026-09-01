@@ -23,8 +23,8 @@ import { eq, inArray } from "drizzle-orm";
 import {
   allocationCards,
   incubatorCards,
-  meetings,
   people,
+  tasks,
   type Database,
 } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
@@ -37,7 +37,7 @@ const BODY_LIMIT = 5_000_000;
 type PersonRow = typeof people.$inferSelect;
 type AllocationRow = typeof allocationCards.$inferSelect;
 type IncubatorRow = typeof incubatorCards.$inferSelect;
-type MeetingRow = typeof meetings.$inferSelect;
+type TaskRow = typeof tasks.$inferSelect;
 
 function toPersonFields(row: PersonRow): ImportPersonFields {
   return {
@@ -82,7 +82,7 @@ async function loadExistingByEmail(db: Database, emails: string[]) {
       people: [] as PersonRow[],
       allocationByPerson: new Map<string, AllocationRow>(),
       incubatorByPerson: new Map<string, IncubatorRow>(),
-      meetingsByPerson: new Map<string, MeetingRow[]>(),
+      tasksByPerson: new Map<string, TaskRow[]>(),
     };
   }
 
@@ -96,11 +96,11 @@ async function loadExistingByEmail(db: Database, emails: string[]) {
       people: personRows,
       allocationByPerson: new Map<string, AllocationRow>(),
       incubatorByPerson: new Map<string, IncubatorRow>(),
-      meetingsByPerson: new Map<string, MeetingRow[]>(),
+      tasksByPerson: new Map<string, TaskRow[]>(),
     };
   }
 
-  const [allocRows, incubRows, meetingRows] = await Promise.all([
+  const [allocRows, incubRows, taskRows] = await Promise.all([
     db
       .select()
       .from(allocationCards)
@@ -109,7 +109,7 @@ async function loadExistingByEmail(db: Database, emails: string[]) {
       .select()
       .from(incubatorCards)
       .where(inArray(incubatorCards.personId, ids)),
-    db.select().from(meetings).where(inArray(meetings.personId, ids)),
+    db.select().from(tasks).where(inArray(tasks.personId, ids)),
   ]);
 
   const allocationByPerson = new Map(
@@ -118,18 +118,18 @@ async function loadExistingByEmail(db: Database, emails: string[]) {
   const incubatorByPerson = new Map(
     incubRows.map((row) => [row.personId, row] as const),
   );
-  const meetingsByPerson = new Map<string, MeetingRow[]>();
-  for (const row of meetingRows) {
-    const list = meetingsByPerson.get(row.personId) ?? [];
+  const tasksByPerson = new Map<string, TaskRow[]>();
+  for (const row of taskRows) {
+    const list = tasksByPerson.get(row.personId) ?? [];
     list.push(row);
-    meetingsByPerson.set(row.personId, list);
+    tasksByPerson.set(row.personId, list);
   }
 
   return {
     people: personRows,
     allocationByPerson,
     incubatorByPerson,
-    meetingsByPerson,
+    tasksByPerson,
   };
 }
 
@@ -166,7 +166,7 @@ async function commitRow(
     existingPerson: PersonRow | null;
     existingAllocation: AllocationRow | null;
     existingIncubator: IncubatorRow | null;
-    existingMeetings: MeetingRow[];
+    existingTasks: TaskRow[];
   },
 ): Promise<void> {
   const incoming = input.mapped.person;
@@ -185,7 +185,7 @@ async function commitRow(
     existingPassReason: input.existingAllocation?.passReason ?? null,
     existingDoNotContact: input.existingPerson?.doNotContact ?? false,
     contacted: input.mapped.contacted,
-    hasMeeting: input.mapped.meetings.length > 0,
+    hasMeeting: input.mapped.tasks.length > 0,
     incubator: incubatorSignal,
     passed: input.mapped.passed,
     rejection: input.mapped.rejection,
@@ -340,22 +340,25 @@ async function commitRow(
     }
   }
 
-  const existingMeetingTimes = new Set(
-    input.existingMeetings.map((row) => row.scheduledAt.toISOString()),
+  const existingTaskKeys = new Set(
+    input.existingTasks.map((row) => `${row.kind}:${row.dueAt.toISOString()}`),
   );
-  const createdMeetings: string[] = [];
-  for (const meeting of input.mapped.meetings) {
-    if (existingMeetingTimes.has(meeting.scheduledAt)) {
+  const createdTasks: string[] = [];
+  for (const task of input.mapped.tasks) {
+    const key = `${task.kind}:${task.dueAt}`;
+    if (existingTaskKeys.has(key)) {
       continue;
     }
-    existingMeetingTimes.add(meeting.scheduledAt);
-    await db.insert(meetings).values({
+    existingTaskKeys.add(key);
+    await db.insert(tasks).values({
       personId,
-      scheduledAt: new Date(meeting.scheduledAt),
-      outcome: "scheduled",
+      kind: task.kind,
+      dueAt: new Date(task.dueAt),
+      notes: task.notes,
+      status: task.status,
       createdBy: actor.id,
     });
-    createdMeetings.push(meeting.scheduledAt);
+    createdTasks.push(task.dueAt);
   }
 
   await writeActivity(db, {
@@ -427,13 +430,13 @@ async function commitRow(
     await writeActivity(db, {
       personId,
       userId: actor.id,
-      type: "stage_change",
+      type: "note",
       payload: {
         who,
-        what: "allocation.stage_change",
+        what: "note",
         when: input.mapped.activity.occurredAt,
-        before: { stage: previousStage },
-        after: { stage: "contacted", text: input.mapped.activity.text },
+        before: null,
+        after: { text: input.mapped.activity.text },
       },
     });
   }
@@ -494,17 +497,17 @@ async function commitRow(
     }
   }
 
-  for (const scheduledAt of createdMeetings) {
+  for (const scheduledAt of createdTasks) {
     await writeActivity(db, {
       personId,
       userId: actor.id,
-      type: "meeting",
+      type: "note",
       payload: {
         who,
-        what: "meeting.create",
+        what: "task.create",
         when: scheduledAt,
         before: null,
-        after: { scheduledAt, outcome: "scheduled" },
+        after: { dueAt: scheduledAt },
       },
     });
   }
@@ -599,8 +602,8 @@ export const importRoutes: FastifyPluginAsyncZod = async (app) => {
             existingIncubator: existingPerson
               ? (loaded.incubatorByPerson.get(existingPerson.id) ?? null)
               : null,
-            existingMeetings: existingPerson
-              ? (loaded.meetingsByPerson.get(existingPerson.id) ?? [])
+            existingTasks: existingPerson
+              ? (loaded.tasksByPerson.get(existingPerson.id) ?? [])
               : [],
           });
         }

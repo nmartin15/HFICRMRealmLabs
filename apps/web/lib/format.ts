@@ -55,3 +55,31 @@ export function formatUsd(amount: number): string {
     maximumFractionDigits: 2,
   }).format(amount);
 }
+
+export function toDatetimeLocalValue(iso: string): string {
+  const date = new Date(iso);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: DISPLAY_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const lookup = Object.fromEntries(
+    parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]),
+  );
+  return `${lookup.year}-${lookup.month}-${lookup.day}T${lookup.hour}:${lookup.minute}`;
+}
+
+export function fromDatetimeLocalValue(value: string): string {
+  return new Date(value).toISOString();
+}
+
+export function defaultTaskDueLocal(): string {
+  const due = new Date();
+  due.setDate(due.getDate() + 1);
+  due.setHours(9, 0, 0, 0);
+  return toDatetimeLocalValue(due.toISOString());
+}

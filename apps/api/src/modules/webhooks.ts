@@ -181,7 +181,7 @@ async function handleApplicationPayload(
       const [row] = await typedTx
         .update(incubatorCards)
         .set({
-          stage: "application_received",
+          stage: "applied",
           applicationRef: body.application_ref,
           applicationResult: answersJson,
         })
@@ -199,7 +199,7 @@ async function handleApplicationPayload(
           applicationRef: current.applicationRef,
         },
         after: {
-          stage: "application_received",
+          stage: "applied",
           applicationRef: body.application_ref,
         },
       });
@@ -213,7 +213,7 @@ async function handleApplicationPayload(
           applicationResult: current.applicationResult,
         },
         after: {
-          stage: "application_received",
+          stage: "applied",
           applicationRef: body.application_ref,
           applicationResult: answersJson,
         },
@@ -283,7 +283,7 @@ async function handleApplicationPayload(
         .insert(incubatorCards)
         .values({
           personId: createdPerson.id,
-          stage: "application_received",
+          stage: "applied",
           applicationRef: body.application_ref,
           applicationResult: answersJson,
           routedAt: when,
@@ -299,7 +299,7 @@ async function handleApplicationPayload(
         when,
         before: null,
         after: {
-          stage: "application_received",
+          stage: "applied",
           applicationRef: body.application_ref,
           applicationResult: answersJson,
           source: "other",
@@ -414,7 +414,7 @@ export const webhookRoutes: FastifyPluginAsyncZod = async (app) => {
           const [updated] = await typedTx
             .update(incubatorCards)
             .set({
-              stage: "paid",
+              stage: "approved",
               priceUsd: decision.priceUsd,
             })
             .where(eq(incubatorCards.id, current.id))
@@ -427,7 +427,7 @@ export const webhookRoutes: FastifyPluginAsyncZod = async (app) => {
             personId: current.personId,
             when,
             before: { stage: current.stage, priceUsd: current.priceUsd },
-            after: { stage: "paid", priceUsd: decision.priceUsd },
+            after: { stage: "approved", priceUsd: decision.priceUsd },
           });
           await writeWebhookActivity(typedTx, {
             personId: current.personId,
@@ -435,7 +435,7 @@ export const webhookRoutes: FastifyPluginAsyncZod = async (app) => {
             when,
             before: { stage: current.stage, priceUsd: current.priceUsd },
             after: {
-              stage: "paid",
+              stage: "approved",
               priceUsd: decision.priceUsd,
               eventId: event.id,
             },

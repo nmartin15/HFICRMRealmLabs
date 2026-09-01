@@ -9,6 +9,8 @@ import {
   type IncubatorStage,
   type LeadTemp,
   type PersonSource,
+  type TaskKind,
+  type TaskStatus,
 } from "./enums";
 import { DISPLAY_TIME_ZONE, zonedLocalToUtc, type CalendarYmd } from "./time";
 
@@ -24,8 +26,11 @@ export const IMPORT_HEADERS = [
   "notes",
   "activity",
   "pre-screening",
+  "preliminary questions",
   "1 meeting",
   "output",
+  "notes from 1 meeting",
+  "follow up after 1 meeting",
   "2 meeting",
   "budget qualified",
   "lead temp",
@@ -33,6 +38,7 @@ export const IMPORT_HEADERS = [
   "incubator ref",
   "incubator result",
   "routing detail",
+  "application follow up",
   "passed",
   "closed",
   "no close reason",
@@ -42,7 +48,15 @@ export const IMPORT_HEADERS = [
 
 const IMPORT_HEADER_SET = new Set<string>(IMPORT_HEADERS);
 
-const IGNORED_HEADERS = new Set(["must-have match", "preferred match"]);
+  const IGNORED_HEADERS = new Set([
+  "must-have match",
+  "preferred match",
+  "pre-screening",
+  "preliminary questions",
+  "incubator result",
+  "routing detail",
+  "application follow up",
+]);
 
 const REQUIRED_HEADERS = ["name", "email"] as const;
 
@@ -104,6 +118,14 @@ export type ImportPersonFields = {
 
 export type ImportMeetingPlan = {
   scheduledAt: string;
+  notes: string | null;
+};
+
+export type ImportTaskPlan = {
+  kind: TaskKind;
+  dueAt: string;
+  notes: string | null;
+  status: TaskStatus;
 };
 
 export type ImportActivityPlan = {
@@ -113,6 +135,7 @@ export type ImportActivityPlan = {
 
 export type ImportIncubatorSignals = {
   statusRoutedAt: string | null;
+  statusStage: IncubatorStage | null;
   applicationRef: string | null;
   applicationResult: string | null;
   routingDetail: string | null;
@@ -127,7 +150,7 @@ export type ImportMappedRow = {
   person: ImportPersonFields | null;
   contacted: boolean;
   activity: ImportActivityPlan | null;
-  meetings: ImportMeetingPlan[];
+  tasks: ImportTaskPlan[];
   incubator: ImportIncubatorSignals;
   passed: boolean;
   rejection: boolean;
@@ -172,13 +195,10 @@ const ALLOCATION_STAGE_RANK: Record<AllocationStage, number> = {
 };
 
 const INCUBATOR_STAGE_RANK: Record<IncubatorStage, number> = {
-  routed: 0,
-  application_sent: 1,
-  application_received: 2,
-  offer_made: 3,
-  paid: 4,
-  enrolled: 5,
-  closed: 6,
+  sent: 0,
+  applied: 1,
+  approved: 2,
+  rejected: 3,
 };
 
 const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -306,18 +326,18 @@ export function parseImportFile(
     return { ok: false, message: "Spreadsheet is empty" };
   }
 
-  const indexByHeader = new Map<string, number>();
+  const indicesByHeader = new Map<string, number[]>();
   for (let i = 0; i < headerRow.cells.length; i += 1) {
     const header = normalizeImportHeader(headerRow.cells[i] ?? "");
-    if (!header || IGNORED_HEADERS.has(header)) {
+    if (!header || IGNORED_HEADERS.has(header) || !IMPORT_HEADER_SET.has(header)) {
       continue;
     }
-    if (IMPORT_HEADER_SET.has(header) && !indexByHeader.has(header)) {
-      indexByHeader.set(header, i);
-    }
+    const list = indicesByHeader.get(header) ?? [];
+    list.push(i);
+    indicesByHeader.set(header, list);
   }
 
-  const missing = REQUIRED_HEADERS.filter((header) => !indexByHeader.has(header));
+  const missing = REQUIRED_HEADERS.filter((header) => !indicesByHeader.has(header));
   if (missing.length > 0) {
     const label = missing[0] === "name" ? "Name" : "Email";
     return { ok: false, message: `Missing required header: ${label}` };
@@ -326,8 +346,11 @@ export function parseImportFile(
   const records = rows.slice(1).map((row) => {
     const values: Record<string, string> = {};
     for (const header of IMPORT_HEADERS) {
-      const index = indexByHeader.get(header);
-      values[header] = index === undefined ? "" : (row.cells[index] ?? "").trim();
+      const indices = indicesByHeader.get(header) ?? [];
+      values[header] = indices
+        .map((index) => (row.cells[index] ?? "").trim())
+        .filter((cell) => cell.length > 0)
+        .join("\n");
     }
     return { rowNumber: row.line, values };
   });
@@ -359,6 +382,9 @@ export function mapPersonSource(raw: string): PersonSource {
   }
   if (value === "workable") {
     return "workable";
+  }
+  if (value === "referral") {
+    return "referral";
   }
   return "other";
 }
@@ -492,11 +518,23 @@ function parseBudgetQualified(
     return "unknown";
   }
   const lower = trimmed.toLowerCase();
-  if (lower === "yes" || lower === "y" || lower === "true") {
-    return "yes";
+  if (lower === "light" || lower === "yes" || lower === "y" || lower === "true") {
+    return "light";
   }
-  if (lower === "no" || lower === "n" || lower === "false") {
-    return "no";
+  if (lower === "heavy") {
+    return "heavy";
+  }
+  if (
+    lower === "false" ||
+    lower === "no" ||
+    lower === "n" ||
+    lower === "not_qualified" ||
+    lower === "not qualified"
+  ) {
+    return "not_qualified";
+  }
+  if (lower === "unknown") {
+    return "unknown";
   }
   return { error: `Invalid Budget Qualified: ${trimmed}` };
 }
@@ -511,6 +549,40 @@ function parseLeadTemp(value: string): LeadTemp | null | { error: string } {
     return { error: `Invalid Lead Temp: ${trimmed}` };
   }
   return parsed.data;
+}
+
+function parseOutputStatus(value: string): TaskStatus {
+  const lower = value.trim().toLowerCase();
+  if (!lower) {
+    return "open";
+  }
+  if (lower.includes("reschedule")) {
+    return "rescheduled";
+  }
+  if (lower.includes("held") || lower.includes("done") || lower.includes("complete")) {
+    return "done";
+  }
+  return "open";
+}
+
+function parseIncubatorStatusStage(value: string): IncubatorStage | null {
+  const lower = value.trim().toLowerCase();
+  if (!lower) {
+    return null;
+  }
+  if (lower.includes("reject")) {
+    return "rejected";
+  }
+  if (lower.includes("approv")) {
+    return "approved";
+  }
+  if (lower.includes("appl")) {
+    return "applied";
+  }
+  if (lower.includes("sent")) {
+    return "sent";
+  }
+  return null;
 }
 
 function parseResumeUrl(value: string): string | null | { error: string } {
@@ -531,8 +603,6 @@ export function mapImportRow(
 ): ImportMappedRow {
   const errors: string[] = [];
   const displayName = nullableText(values.name ?? "");
-
-  // TODO: Pre-Screening and Output columns are accepted and ignored.
 
   const name = splitName(values.name ?? "");
   const emailParsed = emailInputSchema.safeParse(values.email ?? "");
@@ -569,20 +639,28 @@ export function mapImportRow(
     errors.push(leadTemp.error);
   }
 
+  // TODO: Pre-Screening and Preliminary Questions are spreadsheet-only.
+
   const activityRaw = values.activity ?? "";
-  let contacted = false;
   let activity: ImportActivityPlan | null = null;
   if (activityRaw.trim()) {
     const ymd = extractCalendarDate(activityRaw);
-    if (!ymd) {
-      errors.push(`Could not parse Activity date: ${activityRaw.trim()}`);
-    } else {
-      contacted = true;
-      activity = { occurredAt: startOfDayIso(ymd), text: activityRaw.trim() };
-    }
+    activity = {
+      occurredAt: ymd
+        ? startOfDayIso(ymd)
+        : startOfDayIso({ year: 1970, month: 1, day: 1 }),
+      text: activityRaw.trim(),
+    };
   }
 
-  const meetings: ImportMeetingPlan[] = [];
+  const meetingNotes = [
+    nullableText(values["notes from 1 meeting"] ?? ""),
+    nullableText(values.notes ?? ""),
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join("\n");
+  const outputStatus = parseOutputStatus(values.output ?? "");
+  const tasks: ImportTaskPlan[] = [];
   for (const column of ["1 meeting", "2 meeting"] as const) {
     const parsed = parseMeetingCell(values[column] ?? "");
     if (!parsed) {
@@ -591,20 +669,37 @@ export function mapImportRow(
     if ("error" in parsed) {
       errors.push(parsed.error);
     } else {
-      meetings.push({ scheduledAt: parsed.scheduledAt });
+      tasks.push({
+        kind: "meeting",
+        dueAt: parsed.scheduledAt,
+        notes: column === "1 meeting" ? meetingNotes || null : null,
+        status: column === "1 meeting" ? outputStatus : "open",
+      });
     }
+  }
+
+  const followUp = (values["follow up after 1 meeting"] ?? "").trim();
+  if (followUp) {
+    const ymd = extractCalendarDate(followUp);
+    tasks.push({
+      kind: "call",
+      dueAt: ymd ? startOfDayIso(ymd) : new Date().toISOString(),
+      notes: followUp,
+      status: "open",
+    });
   }
 
   const incubatorStatus = values["incubator status"] ?? "";
   let statusRoutedAt: string | null = null;
+  const statusStage = parseIncubatorStatusStage(incubatorStatus);
   if (incubatorStatus.trim()) {
     const ymd = extractCalendarDate(incubatorStatus);
-    if (!ymd) {
-      errors.push(
-        `Could not parse Incubator Status date: ${incubatorStatus.trim()}`,
-      );
-    } else {
+    if (ymd) {
       statusRoutedAt = startOfDayIso(ymd);
+    } else if (!statusStage) {
+      errors.push(
+        `Could not parse Incubator Status: ${incubatorStatus.trim()}`,
+      );
     }
   }
 
@@ -619,6 +714,18 @@ export function mapImportRow(
   if (rejection && !rejectionReason) {
     errors.push("Rejection Reason is required when Rejection is set");
   }
+  if (rejection && rejectionReason) {
+    tasks.push({
+      kind: "dnc",
+      dueAt: appliedAt
+        ? startOfDayIso(parseCalendarDate(appliedAt) ?? { year: 1970, month: 1, day: 1 })
+        : startOfDayIso({ year: 1970, month: 1, day: 1 }),
+      notes: rejectionReason,
+      status: "done",
+    });
+  }
+
+  const contacted = tasks.some((task) => task.kind !== "dnc");
 
   const person: ImportPersonFields | null =
     !("error" in name) && emailParsed.success
@@ -632,7 +739,7 @@ export function mapImportRow(
           source: mapPersonSource(values.source ?? ""),
           resumeUrl: typeof resume === "string" ? resume : null,
           appliedAt,
-          notes: nullableText(values.notes ?? ""),
+          notes: null,
           leadTemp: typeof leadTemp === "string" ? leadTemp : null,
           budgetQualified: typeof budget === "string" ? budget : "unknown",
         }
@@ -645,12 +752,13 @@ export function mapImportRow(
     person,
     contacted,
     activity,
-    meetings,
+    tasks,
     incubator: {
       statusRoutedAt,
+      statusStage,
       applicationRef: nullableText(values["incubator ref"] ?? ""),
-      applicationResult: nullableText(values["incubator result"] ?? ""),
-      routingDetail: nullableText(values["routing detail"] ?? ""),
+      applicationResult: null,
+      routingDetail: null,
       closed,
       closeReason,
     },
@@ -805,9 +913,9 @@ export function planImportAllocation(input: {
   }
 
   if (input.passed && !input.rejection) {
-    stage = "allocated";
-    decision = "allocate";
-    passReason = null;
+    stage = "passed";
+    decision = "pass";
+    passReason = input.existingPassReason;
   }
 
   if (input.rejection) {
@@ -823,7 +931,10 @@ export function hasIncubatorImportSignal(
   signals: ImportIncubatorSignals,
 ): boolean {
   return Boolean(
-    signals.statusRoutedAt || signals.applicationRef || signals.closed,
+    signals.statusRoutedAt ||
+      signals.statusStage ||
+      signals.applicationRef ||
+      signals.closed,
   );
 }
 
@@ -836,15 +947,18 @@ export function planImportIncubator(
     return null;
   }
 
-  let stage: IncubatorStage = existing?.stage ?? "application_sent";
-  if (!existing && signals.statusRoutedAt) {
-    stage = "application_sent";
+  let stage: IncubatorStage = existing?.stage ?? "sent";
+  if (!existing && (signals.statusRoutedAt || signals.statusStage === "sent")) {
+    stage = "sent";
+  }
+  if (signals.statusStage) {
+    stage = atLeastIncubatorStage(stage, signals.statusStage);
   }
   if (signals.applicationRef) {
-    stage = atLeastIncubatorStage(stage, "application_received");
+    stage = atLeastIncubatorStage(stage, "applied");
   }
-  if (signals.closed) {
-    stage = "closed";
+  if (signals.closed || signals.statusStage === "rejected") {
+    stage = "rejected";
   }
 
   return {
@@ -860,11 +974,11 @@ export function planImportIncubator(
       ? signals.routingDetail
       : (existing?.routingDetail ?? null),
     closeReason:
-      stage === "closed"
+      stage === "rejected"
         ? (signals.closeReason ?? existing?.closeReason ?? null)
         : (existing?.closeReason ?? null),
     closedAt:
-      stage === "closed" ? (existing?.closedAt ?? nowIso) : null,
+      stage === "rejected" ? (existing?.closedAt ?? nowIso) : null,
   };
 }
 

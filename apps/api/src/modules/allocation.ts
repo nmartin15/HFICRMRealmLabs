@@ -7,27 +7,28 @@ import {
   canMoveAllocationStage,
   canSendAppLinkWithoutCall,
   canViewCard,
+  createAllocationApplicantBodySchema,
+  createApplicantResponseSchema,
   daysInStage,
   decideBodySchema,
   isAllocationOpenStage,
   isOnAllocationBoard,
-  nurtureListResponseSchema,
-  nurtureRouteBodySchema,
   okResponseSchema,
   stageEnteredAtIso,
   type AllocationBoardCard,
   type AllocationOpenStage,
 } from "@realm-labs/contracts";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
-import { and, asc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import {
   activities,
   allocationCards,
-  meetings,
   people,
+  tasks,
   type Database,
 } from "@realm-labs/db";
-import { applyDecision, reopenFromNurture } from "../lib/routing.js";
+import { createManualApplicant } from "../lib/applicants.js";
+import { applyDecision } from "../lib/routing.js";
 import {
   serializeAllocationCard,
   serializePerson,
@@ -80,18 +81,17 @@ async function toBoardCards(
   const personIds = rows.map((row) => row.person.id);
   const now = new Date();
 
-  const [meetingRows, stageChangeRows] = await Promise.all([
+  const [taskRows, stageChangeRows] = await Promise.all([
     db
       .select()
-      .from(meetings)
+      .from(tasks)
       .where(
         and(
-          inArray(meetings.personId, personIds),
-          gte(meetings.scheduledAt, now),
-          inArray(meetings.outcome, ["scheduled", "rescheduled"]),
+          inArray(tasks.personId, personIds),
+          eq(tasks.status, "open"),
         ),
       )
-      .orderBy(asc(meetings.scheduledAt)),
+      .orderBy(asc(tasks.dueAt)),
     db
       .select()
       .from(activities)
@@ -103,12 +103,12 @@ async function toBoardCards(
       ),
   ]);
 
-  const nextMeetingByPerson = new Map<string, { id: string; at: string }>();
-  for (const meeting of meetingRows) {
-    if (!nextMeetingByPerson.has(meeting.personId)) {
-      nextMeetingByPerson.set(meeting.personId, {
-        id: meeting.id,
-        at: meeting.scheduledAt.toISOString(),
+  const nextTaskByPerson = new Map<string, { kind: typeof taskRows[number]["kind"]; at: string }>();
+  for (const task of taskRows) {
+    if (!nextTaskByPerson.has(task.personId)) {
+      nextTaskByPerson.set(task.personId, {
+        kind: task.kind,
+        at: task.dueAt.toISOString(),
       });
     }
   }
@@ -145,10 +145,11 @@ async function toBoardCards(
         company: person.company,
         leadTemp: person.leadTemp,
         budgetQualified: person.budgetQualified,
+        programTrack: person.programTrack,
       },
       daysInStage: daysInStage(enteredAt, now),
-      nextMeetingAt: nextMeetingByPerson.get(person.id)?.at ?? null,
-      nextMeetingId: nextMeetingByPerson.get(person.id)?.id ?? null,
+      nextTaskAt: nextTaskByPerson.get(person.id)?.at ?? null,
+      nextTaskKind: nextTaskByPerson.get(person.id)?.kind ?? null,
     });
   });
 }
@@ -156,6 +157,7 @@ async function toBoardCards(
 const listedPeople = and(
   isNull(people.deletedAt),
   eq(people.doNotContact, false),
+  eq(people.programTrack, "allocation"),
 );
 
 export const allocationRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -201,33 +203,19 @@ export const allocationRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
-  app.get(
-    "/nurture",
+  app.post(
+    "/allocation",
     {
       schema: {
-        response: { 200: nurtureListResponseSchema },
+        body: createAllocationApplicantBodySchema,
+        response: { 200: createApplicantResponseSchema },
       },
     },
     async (req) => {
-      requireUser(req);
-      if (!canViewCard()) {
-        throw httpError(403, "FORBIDDEN", "Forbidden");
-      }
-
-      const rows = await app.db
-        .select({
-          card: allocationCards,
-          person: people,
-        })
-        .from(allocationCards)
-        .innerJoin(people, eq(allocationCards.personId, people.id))
-        .where(
-          and(listedPeople, eq(allocationCards.stage, "nurture")),
-        )
-        .orderBy(asc(allocationCards.nurtureFollowUpAt));
-
-      const data = await toBoardCards(app.db, rows);
-      return nurtureListResponseSchema.parse({ data });
+      const actor = requireUser(req);
+      return createApplicantResponseSchema.parse(
+        await createManualApplicant(app.db, actor, "allocation", req.body),
+      );
     },
   );
 
@@ -327,59 +315,6 @@ export const allocationRoutes: FastifyPluginAsyncZod = async (app) => {
         { decision: "route_incubator" },
         { noCallAppLink: true },
       );
-      return { ok: true as const };
-    },
-  );
-
-  app.post(
-    "/nurture/:id/reopen",
-    {
-      schema: {
-        params: allocationCardIdParamsSchema,
-        response: { 200: okResponseSchema },
-      },
-    },
-    async (req) => {
-      const actor = requireUser(req);
-      await reopenFromNurture(app.db, actor, req.params.id);
-      return { ok: true as const };
-    },
-  );
-
-  app.post(
-    "/nurture/:id/route",
-    {
-      schema: {
-        params: allocationCardIdParamsSchema,
-        body: nurtureRouteBodySchema,
-        response: { 200: okResponseSchema },
-      },
-    },
-    async (req) => {
-      const actor = requireUser(req);
-      await applyDecision(app.db, actor, req.params.id, {
-        ...req.body,
-        decision: "route_incubator",
-      });
-      return { ok: true as const };
-    },
-  );
-
-  app.post(
-    "/nurture/:id/pass",
-    {
-      schema: {
-        params: allocationCardIdParamsSchema,
-        response: { 200: okResponseSchema },
-      },
-    },
-    async (req) => {
-      const actor = requireUser(req);
-      await applyDecision(app.db, actor, req.params.id, {
-        decision: "pass",
-        doNotContact: false,
-        nurture: false,
-      });
       return { ok: true as const };
     },
   );

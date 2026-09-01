@@ -306,17 +306,17 @@ describe("computeReport", () => {
         person({
           id: "held-nb",
           allocationDecision: "route_incubator",
-          budgetQualified: "no",
+          budgetQualified: "not_qualified",
         }),
         person({
           id: "held-yes",
           allocationDecision: "route_incubator",
-          budgetQualified: "yes",
+          budgetQualified: "light",
         }),
         person({
           id: "alloc",
           allocationDecision: "allocate",
-          budgetQualified: "yes",
+          budgetQualified: "light",
         }),
         person({
           id: "unknown",

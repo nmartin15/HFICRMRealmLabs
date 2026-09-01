@@ -19,8 +19,8 @@ import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Record<HomeTodoKind, string> = {
   close_meeting: "Call",
+  task: "Task",
   email: "Email",
-  nurture: "Nurture",
   call: "Call",
   decision: "Task",
   incubator: "Task",
@@ -28,8 +28,8 @@ const KIND_LABEL: Record<HomeTodoKind, string> = {
 
 const KIND_CLASS: Record<HomeTodoKind, string> = {
   close_meeting: "text-canary",
+  task: "text-primary",
   email: "text-teal",
-  nurture: "text-primary",
   call: "text-canary",
   decision: "text-primary",
   incubator: "text-primary",

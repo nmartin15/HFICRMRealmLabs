@@ -13,7 +13,6 @@ const nav = [
   { href: "/inbox/unmatched", label: "Unmatched" },
   { href: "/allocation", label: "Allocation" },
   { href: "/incubator", label: "Incubator" },
-  { href: "/nurture", label: "Nurture" },
   { href: "/reports", label: "Reports" },
   { href: "/import", label: "Import" },
   { href: "/settings", label: "Settings" },

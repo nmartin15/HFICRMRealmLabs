@@ -15,6 +15,20 @@
       "when": 1787615000000,
       "tag": "0001_mailboxes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788238200000,
+      "tag": "0002_discard_nurture",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788278400000,
+      "tag": "0003_program_tasks",
+      "breakpoints": true
     }
   ]
 }

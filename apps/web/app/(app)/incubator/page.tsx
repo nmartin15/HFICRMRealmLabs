@@ -18,13 +18,13 @@ import {
 import { api } from "@/lib/api";
 import { formatUsd } from "@/lib/format";
 import { isTypingTarget } from "@/hooks/use-list-navigation";
+import { ApplicantDialog } from "@/components/applicant-dialog";
 import {
   ApplicationRefDialog,
   CloseReasonDialog,
-  OfferDialog,
-  PaidConfirmDialog,
 } from "@/components/incubator-dialogs";
 import { NoteDialog } from "@/components/note-dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 type PendingMove = {
@@ -43,9 +43,8 @@ export default function IncubatorBoardPage() {
   const [closedOpen, setClosedOpen] = useState(false);
   const [applicationRefMove, setApplicationRefMove] =
     useState<PendingMove | null>(null);
-  const [offerMove, setOfferMove] = useState<PendingMove | null>(null);
-  const [paidMove, setPaidMove] = useState<PendingMove | null>(null);
   const [closeMove, setCloseMove] = useState<PendingMove | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const load = useCallback(async () => {
     const data = await api<IncubatorBoardResponse>("/incubator");
@@ -74,7 +73,7 @@ export default function IncubatorBoardPage() {
   const focusedColumn = columns[columnIndex];
   const focusedCard = focusedColumn?.cards[cardIndex] ?? null;
   const dialogOpen = Boolean(
-    noteCard || applicationRefMove || offerMove || paidMove || closeMove,
+    noteCard || applicationRefMove || closeMove || createOpen,
   );
 
   useEffect(() => {
@@ -129,6 +128,10 @@ export default function IncubatorBoardPage() {
         event.preventDefault();
         setNoteCard(focusedCard);
       }
+      if (event.key === "c") {
+        event.preventDefault();
+        setCreateOpen(true);
+      }
     }
 
     window.addEventListener("keydown", onKey);
@@ -151,7 +154,7 @@ export default function IncubatorBoardPage() {
     }
     const next = await api<IncubatorBoardResponse>("/incubator");
     setBoard(next);
-    if (body.stage !== "closed" && isIncubatorOpenStage(body.stage)) {
+    if (isIncubatorOpenStage(body.stage)) {
       const nextColumn = INCUBATOR_OPEN_STAGES.indexOf(body.stage);
       setColumnIndex(nextColumn);
       const idx = next.columns[body.stage].findIndex(
@@ -166,19 +169,11 @@ export default function IncubatorBoardPage() {
     if (card.card.stage === stage) {
       return;
     }
-    if (stage === "application_received" && !card.card.applicationRef) {
+    if (stage === "applied" && !card.card.applicationRef) {
       setApplicationRefMove({ card, stage });
       return;
     }
-    if (stage === "offer_made") {
-      setOfferMove({ card, stage });
-      return;
-    }
-    if (stage === "paid") {
-      setPaidMove({ card, stage });
-      return;
-    }
-    if (stage === "closed") {
+    if (stage === "rejected") {
       setCloseMove({ card, stage });
       return;
     }
@@ -193,12 +188,7 @@ export default function IncubatorBoardPage() {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
 
-  const pendingCard =
-    applicationRefMove?.card ??
-    offerMove?.card ??
-    paidMove?.card ??
-    closeMove?.card ??
-    null;
+  const pendingCard = applicationRefMove?.card ?? closeMove?.card ?? null;
 
   return (
     <div className="space-y-4">
@@ -206,84 +196,91 @@ export default function IncubatorBoardPage() {
         <div>
           <h1 className="text-xl font-medium tracking-tight">Incubator</h1>
           <p className="text-xs text-muted-foreground">
-            j/k cards · h/l columns · enter record · n note
+            j/k cards · h/l columns · enter record · n note · c new
           </p>
         </div>
         {board ? (
-          <p className="text-sm">
-            Pipeline {formatUsd(board.totals.pipelineUsd)}
-            <span className="text-muted-foreground">
-              {" "}
-              · weighted {formatUsd(board.totals.weightedUsd)}
-            </span>
-          </p>
-        ) : null}
+          <div className="flex items-center gap-3">
+            <p className="text-sm">
+              Pipeline {formatUsd(board.totals.pipelineUsd)}
+              <span className="text-muted-foreground">
+                {" "}
+                · weighted {formatUsd(board.totals.weightedUsd)}
+              </span>
+            </p>
+            <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
+              New applicant
+            </Button>
+          </div>
+        ) : (
+          <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
+            New applicant
+          </Button>
+        )}
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-      <div className="overflow-x-auto">
-        <div className="grid min-w-[72rem] grid-cols-6 gap-3">
-          {columns.map((column, index) => {
-            const stats = board?.totals.columns[column.stage];
-            return (
-              <section
-                key={column.stage}
-                className={cn(
-                  "min-h-[50vh] rounded-lg border border-border/70 bg-card/50 p-2",
-                  index === columnIndex && "border-primary/50",
-                )}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const cardId = event.dataTransfer.getData("text/plain");
-                  const card = findCard(board, cardId);
-                  if (card) {
-                    void requestMove(card, column.stage);
-                  }
-                }}
-              >
-                <header className="mb-2 px-1">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <h2 className="text-sm font-medium">
-                      {INCUBATOR_STAGE_LABELS[column.stage]}
-                    </h2>
-                    <span className="text-xs text-muted-foreground">
-                      {stats?.count ?? column.cards.length}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {formatUsd(stats?.priceUsd ?? 0)}
-                  </p>
-                </header>
-                <ul className="space-y-2">
-                  {column.cards.map((card, cardIdx) => (
-                    <IncubatorCardView
-                      key={card.card.id}
-                      card={card}
-                      focused={index === columnIndex && cardIdx === cardIndex}
-                      menuOpen={menuCardId === card.card.id}
-                      onFocus={() => {
-                        setColumnIndex(index);
-                        setCardIndex(cardIdx);
-                      }}
-                      onOpen={() => router.push(`/people/${card.person.id}`)}
-                      onToggleMenu={() =>
-                        setMenuCardId((current) =>
-                          current === card.card.id ? null : card.card.id,
-                        )
-                      }
-                      onClose={() => void requestMove(card, "closed")}
-                    />
-                  ))}
-                </ul>
-              </section>
-            );
-          })}
-        </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        {columns.map((column, index) => {
+          const stats = board?.totals.columns[column.stage];
+          return (
+            <section
+              key={column.stage}
+              className={cn(
+                "min-h-[50vh] rounded-lg border border-border/70 bg-card/50 p-2",
+                index === columnIndex && "border-primary/50",
+              )}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const cardId = event.dataTransfer.getData("text/plain");
+                const card = findCard(board, cardId);
+                if (card) {
+                  void requestMove(card, column.stage);
+                }
+              }}
+            >
+              <header className="mb-2 px-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <h2 className="text-sm font-medium">
+                    {INCUBATOR_STAGE_LABELS[column.stage]}
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    {stats?.count ?? column.cards.length}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {formatUsd(stats?.priceUsd ?? 0)}
+                </p>
+              </header>
+              <ul className="space-y-2">
+                {column.cards.map((card, cardIdx) => (
+                  <IncubatorCardView
+                    key={card.card.id}
+                    card={card}
+                    focused={index === columnIndex && cardIdx === cardIndex}
+                    menuOpen={menuCardId === card.card.id}
+                    onFocus={() => {
+                      setColumnIndex(index);
+                      setCardIndex(cardIdx);
+                    }}
+                    onOpen={() => router.push(`/people/${card.person.id}`)}
+                    onToggleMenu={() =>
+                      setMenuCardId((current) =>
+                        current === card.card.id ? null : card.card.id,
+                      )
+                    }
+                    onReject={() => void requestMove(card, "rejected")}
+                  />
+                ))}
+              </ul>
+            </section>
+          );
+        })}
       </div>
 
       <details
@@ -300,19 +297,19 @@ export default function IncubatorBoardPage() {
           const cardId = event.dataTransfer.getData("text/plain");
           const card = findCard(board, cardId);
           if (card) {
-            void requestMove(card, "closed");
+            void requestMove(card, "rejected");
           }
         }}
         className="rounded-lg border"
       >
         <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
-          Closed ({board?.closed.length ?? 0})
+          Rejected ({board?.closed.length ?? 0})
         </summary>
         <div className="space-y-3 border-t px-3 py-3">
           {(board?.closed.length ?? 0) === 0 ? (
             <p className="text-sm text-muted-foreground">None.</p>
           ) : (
-            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {(board?.closed ?? []).map((card) => (
                 <li key={card.card.id}>
                   <button
@@ -324,7 +321,7 @@ export default function IncubatorBoardPage() {
                       {personDisplayName(card.person)}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {card.card.closeReason ?? "Closed"}
+                      {card.card.closeReason ?? "Rejected"}
                       {card.card.tier
                         ? ` · ${incubatorTierLabel(card.card.tier)}`
                         : ""}
@@ -337,11 +334,31 @@ export default function IncubatorBoardPage() {
         </div>
       </details>
 
+      <ApplicantDialog
+        open={createOpen}
+        pipeline="incubator"
+        onClose={() => setCreateOpen(false)}
+        onCreated={async (created) => {
+          const next = await api<IncubatorBoardResponse>("/incubator");
+          setBoard(next);
+          const sentIdx = next.columns.sent.findIndex(
+            (item) => item.card.id === created.cardId,
+          );
+          const appliedIdx = next.columns.applied.findIndex(
+            (item) => item.card.id === created.cardId,
+          );
+          if (appliedIdx >= 0) {
+            setColumnIndex(INCUBATOR_OPEN_STAGES.indexOf("applied"));
+            setCardIndex(appliedIdx);
+          } else {
+            setColumnIndex(INCUBATOR_OPEN_STAGES.indexOf("sent"));
+            setCardIndex(sentIdx < 0 ? 0 : sentIdx);
+          }
+        }}
+      />
       <ApplicationRefDialog
         open={Boolean(applicationRefMove)}
-        personName={
-          pendingCard ? personDisplayName(pendingCard.person) : ""
-        }
+        personName={pendingCard ? personDisplayName(pendingCard.person) : ""}
         initialRef={applicationRefMove?.card.card.applicationRef ?? ""}
         onClose={() => setApplicationRefMove(null)}
         onSubmit={async (applicationRef) => {
@@ -349,39 +366,8 @@ export default function IncubatorBoardPage() {
             return;
           }
           await patchStage(applicationRefMove.card.card.id, {
-            stage: "application_received",
+            stage: "applied",
             applicationRef,
-          });
-        }}
-      />
-      <OfferDialog
-        open={Boolean(offerMove)}
-        personName={pendingCard ? personDisplayName(pendingCard.person) : ""}
-        initialTier={offerMove?.card.card.tier ?? null}
-        initialPriceUsd={offerMove?.card.card.priceUsd ?? null}
-        onClose={() => setOfferMove(null)}
-        onSubmit={async ({ tier, priceUsd }) => {
-          if (!offerMove) {
-            return;
-          }
-          await patchStage(offerMove.card.card.id, {
-            stage: "offer_made",
-            tier,
-            priceUsd,
-          });
-        }}
-      />
-      <PaidConfirmDialog
-        open={Boolean(paidMove)}
-        personName={pendingCard ? personDisplayName(pendingCard.person) : ""}
-        onClose={() => setPaidMove(null)}
-        onSubmit={async () => {
-          if (!paidMove) {
-            return;
-          }
-          await patchStage(paidMove.card.card.id, {
-            stage: "paid",
-            confirmPaid: true,
           });
         }}
       />
@@ -394,7 +380,7 @@ export default function IncubatorBoardPage() {
             return;
           }
           await patchStage(closeMove.card.card.id, {
-            stage: "closed",
+            stage: "rejected",
             closeReason,
           });
         }}
@@ -436,7 +422,7 @@ function IncubatorCardView({
   onFocus,
   onOpen,
   onToggleMenu,
-  onClose,
+  onReject,
 }: {
   card: IncubatorBoardCard;
   focused: boolean;
@@ -444,7 +430,7 @@ function IncubatorCardView({
   onFocus: () => void;
   onOpen: () => void;
   onToggleMenu: () => void;
-  onClose: () => void;
+  onReject: () => void;
 }) {
   return (
     <li>
@@ -489,10 +475,10 @@ function IncubatorCardView({
                   className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted"
                   onClick={(event) => {
                     event.stopPropagation();
-                    onClose();
+                    onReject();
                   }}
                 >
-                  Close
+                  Reject
                 </button>
               </div>
             ) : null}

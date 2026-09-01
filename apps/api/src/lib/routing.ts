@@ -1,5 +1,4 @@
 import {
-  canReopenFromNurture,
   decide,
   decideBodySchema,
   todayIsoInDisplayZone,
@@ -167,53 +166,4 @@ function isUniqueViolation(error: unknown): boolean {
         : undefined;
   }
   return false;
-}
-
-export async function reopenFromNurture(
-  db: Database,
-  actor: AuthedUser,
-  cardId: string,
-): Promise<void> {
-  const cardRows = await db
-    .select()
-    .from(allocationCards)
-    .where(eq(allocationCards.id, cardId))
-    .limit(1);
-  const card = cardRows[0];
-  if (!card) {
-    throw httpError(404, "NOT_FOUND", "Allocation card not found");
-  }
-  if (!canReopenFromNurture(card.stage)) {
-    throw httpError(
-      400,
-      "INVALID_STAGE",
-      "Only nurture cards can be reopened to Contacted",
-    );
-  }
-
-  const when = new Date();
-  await db
-    .update(allocationCards)
-    .set({
-      stage: "contacted",
-      decision: null,
-      decidedAt: null,
-      decidedBy: null,
-      passReason: null,
-      nurtureFollowUpAt: null,
-    })
-    .where(eq(allocationCards.id, card.id));
-
-  await writeActivity(db, {
-    personId: card.personId,
-    userId: actor.id,
-    type: "stage_change",
-    payload: {
-      who: { id: actor.id, email: actor.email },
-      what: "allocation.stage_change",
-      when: when.toISOString(),
-      before: { stage: card.stage },
-      after: { stage: "contacted" },
-    },
-  });
 }

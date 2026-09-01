@@ -4,6 +4,7 @@ import {
   incubatorStageSchema,
   incubatorTierSchema,
   isoDateTimeSchema,
+  programTrackSchema,
   uuidSchema,
 } from "./enums";
 
@@ -55,6 +56,7 @@ export const incubatorBoardPersonSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   budgetQualified: budgetQualifiedSchema,
+  programTrack: programTrackSchema.nullable(),
 });
 export type IncubatorBoardPerson = z.infer<typeof incubatorBoardPersonSchema>;
 
@@ -73,24 +75,18 @@ export const incubatorColumnStatsSchema = z.object({
 
 export const incubatorBoardResponseSchema = z.object({
   columns: z.object({
-    routed: z.array(incubatorBoardCardSchema),
-    application_sent: z.array(incubatorBoardCardSchema),
-    application_received: z.array(incubatorBoardCardSchema),
-    offer_made: z.array(incubatorBoardCardSchema),
-    paid: z.array(incubatorBoardCardSchema),
-    enrolled: z.array(incubatorBoardCardSchema),
+    sent: z.array(incubatorBoardCardSchema),
+    applied: z.array(incubatorBoardCardSchema),
+    approved: z.array(incubatorBoardCardSchema),
   }),
   closed: z.array(incubatorBoardCardSchema),
   totals: z.object({
     pipelineUsd: z.number().nonnegative(),
     weightedUsd: z.number().nonnegative(),
     columns: z.object({
-      routed: incubatorColumnStatsSchema,
-      application_sent: incubatorColumnStatsSchema,
-      application_received: incubatorColumnStatsSchema,
-      offer_made: incubatorColumnStatsSchema,
-      paid: incubatorColumnStatsSchema,
-      enrolled: incubatorColumnStatsSchema,
+      sent: incubatorColumnStatsSchema,
+      applied: incubatorColumnStatsSchema,
+      approved: incubatorColumnStatsSchema,
     }),
   }),
 });

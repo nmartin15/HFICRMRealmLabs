@@ -7,8 +7,7 @@ export const STRIPE_SIGNATURE_HEADER = "stripe-signature";
 export const STRIPE_CHECKOUT_SESSION_COMPLETED = "checkout.session.completed";
 
 export const APPLICATION_WEBHOOK_ELIGIBLE_STAGES = [
-  "routed",
-  "application_sent",
+  "sent",
 ] as const;
 export type ApplicationWebhookEligibleStage =
   (typeof APPLICATION_WEBHOOK_ELIGIBLE_STAGES)[number];
@@ -207,7 +206,7 @@ export type StripeWebhookDecision =
       action: "paid";
       personId: string;
       cardId: string;
-      fromStage: "offer_made";
+      fromStage: "applied";
       priceUsd: number;
     };
 
@@ -231,14 +230,14 @@ export function decideStripeCheckout(input: {
   if (input.amountTotal === null || input.amountTotal === undefined) {
     return { action: "ignore" };
   }
-  if (!input.card || input.card.stage !== "offer_made") {
+  if (!input.card || input.card.stage !== "applied") {
     return { action: "ignore" };
   }
   return {
     action: "paid",
     personId: input.card.personId,
     cardId: input.card.id,
-    fromStage: "offer_made",
+    fromStage: "applied",
     priceUsd: stripeAmountToUsd(input.amountTotal),
   };
 }

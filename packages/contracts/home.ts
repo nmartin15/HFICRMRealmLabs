@@ -8,20 +8,21 @@ import { emailThreadSchema } from "./email-threads";
 import {
   isoDateSchema,
   isoDateTimeSchema,
+  taskKindSchema,
   uuidSchema,
 } from "./enums";
 import type { IncubatorStage } from "./enums";
+import { TASK_KIND_LABELS } from "./tasks";
 import {
   meetingDigestItemSchema,
   meetingDigestPersonSchema,
   type MeetingDigestItem,
 } from "./meetings";
-import { zonedIsoDate } from "./time";
 
 export const HOME_TODO_KINDS = [
   "close_meeting",
+  "task",
   "email",
-  "nurture",
   "call",
   "decision",
   "incubator",
@@ -32,8 +33,8 @@ export type HomeTodoKind = z.infer<typeof homeTodoKindSchema>;
 
 const KIND_ORDER: Record<HomeTodoKind, number> = {
   close_meeting: 0,
-  email: 1,
-  nurture: 2,
+  task: 1,
+  email: 2,
   call: 3,
   decision: 4,
   incubator: 5,
@@ -67,17 +68,20 @@ export const homeDecisionInputSchema = z.object({
 });
 export type HomeDecisionInput = z.infer<typeof homeDecisionInputSchema>;
 
-export const homeNurtureInputSchema = z.object({
-  person: meetingDigestPersonSchema,
-  followUpAt: isoDateSchema.nullable(),
-});
-export type HomeNurtureInput = z.infer<typeof homeNurtureInputSchema>;
-
 export const homeIncubatorInputSchema = z.object({
   person: meetingDigestPersonSchema,
-  stage: z.enum(["application_received", "offer_made"]),
+  stage: z.enum(["applied"]),
 });
 export type HomeIncubatorInput = z.infer<typeof homeIncubatorInputSchema>;
+
+export const homeOpenTaskInputSchema = z.object({
+  id: uuidSchema,
+  person: meetingDigestPersonSchema,
+  kind: taskKindSchema,
+  dueAt: isoDateTimeSchema,
+  notes: z.string().nullable(),
+});
+export type HomeOpenTaskInput = z.infer<typeof homeOpenTaskInputSchema>;
 
 export const homeSnapshotResponseSchema = z.object({
   date: isoDateSchema,
@@ -101,17 +105,10 @@ export function meetingNeedsOutcome(
   return outcome === "scheduled" && new Date(scheduledAt).getTime() <= now.getTime();
 }
 
-export function isNurtureDue(
-  followUpAt: string | null,
-  todayYmd: string,
-): boolean {
-  return followUpAt === null || followUpAt <= todayYmd;
-}
-
 export function isIncubatorWaitingStage(
   stage: IncubatorStage,
-): stage is "application_received" | "offer_made" {
-  return stage === "application_received" || stage === "offer_made";
+): stage is "applied" {
+  return stage === "applied";
 }
 
 function todo(
@@ -123,6 +120,7 @@ function todo(
 export function buildHomeTodos(input: {
   leftoverMeetings: MeetingDigestItem[];
   todayMeetings: MeetingDigestItem[];
+  openTasks: HomeOpenTaskInput[];
   unmatchedEmails: Array<{
     id: string;
     subject: string;
@@ -131,7 +129,6 @@ export function buildHomeTodos(input: {
   }>;
   callsDue: HomeCallInput[];
   decisions: HomeDecisionInput[];
-  nurtureDue: HomeNurtureInput[];
   incubatorWaiting: HomeIncubatorInput[];
   now: Date;
 }): HomeTodo[] {
@@ -174,6 +171,22 @@ export function buildHomeTodos(input: {
     );
   }
 
+  for (const item of input.openTasks) {
+    items.push(
+      todo({
+        id: `task:${item.id}`,
+        kind: "task",
+        href: `/people/${item.person.id}`,
+        title: personDisplayName(item.person),
+        detail: item.notes
+          ? `${TASK_KIND_LABELS[item.kind]} · ${item.notes}`
+          : TASK_KIND_LABELS[item.kind],
+        at: item.dueAt,
+        meetingId: null,
+      }),
+    );
+  }
+
   for (const thread of input.unmatchedEmails) {
     items.push(
       todo({
@@ -183,26 +196,6 @@ export function buildHomeTodos(input: {
         title: thread.subject || "(no subject)",
         detail: thread.snippet ?? "Unmatched email",
         at: thread.lastMessageAt,
-        meetingId: null,
-      }),
-    );
-  }
-
-  const todayYmd = zonedIsoDate(input.now);
-  for (const item of input.nurtureDue) {
-    if (!isNurtureDue(item.followUpAt, todayYmd)) {
-      continue;
-    }
-    items.push(
-      todo({
-        id: `nurture:${item.person.id}`,
-        kind: "nurture",
-        href: `/people/${item.person.id}`,
-        title: personDisplayName(item.person),
-        detail: item.followUpAt
-          ? `Nurture follow-up ${item.followUpAt}`
-          : "Nurture follow-up due",
-        at: item.followUpAt ? `${item.followUpAt}T12:00:00.000Z` : null,
         meetingId: null,
       }),
     );

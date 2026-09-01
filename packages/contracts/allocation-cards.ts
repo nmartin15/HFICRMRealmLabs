@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { ALLOCATION_OPEN_STAGES } from "./allocation";
+import {
+  ALLOCATION_OPEN_STAGES,
+} from "./allocation";
 import {
   allocationDecisionSchema,
   allocationStageSchema,
@@ -7,6 +9,8 @@ import {
   isoDateSchema,
   isoDateTimeSchema,
   leadTempSchema,
+  programTrackSchema,
+  taskKindSchema,
   uuidSchema,
 } from "./enums";
 
@@ -62,6 +66,7 @@ export const allocationBoardPersonSchema = z.object({
   company: z.string().nullable(),
   leadTemp: leadTempSchema.nullable(),
   budgetQualified: budgetQualifiedSchema,
+  programTrack: programTrackSchema.nullable(),
 });
 export type AllocationBoardPerson = z.infer<typeof allocationBoardPersonSchema>;
 
@@ -69,8 +74,8 @@ export const allocationBoardCardSchema = z.object({
   card: allocationCardSchema,
   person: allocationBoardPersonSchema,
   daysInStage: z.number().int().nonnegative(),
-  nextMeetingAt: isoDateTimeSchema.nullable(),
-  nextMeetingId: uuidSchema.nullable(),
+  nextTaskAt: isoDateTimeSchema.nullable(),
+  nextTaskKind: taskKindSchema.nullable(),
 });
 export type AllocationBoardCard = z.infer<typeof allocationBoardCardSchema>;
 
@@ -86,8 +91,3 @@ export const allocationBoardResponseSchema = z.object({
 export type AllocationBoardResponse = z.infer<
   typeof allocationBoardResponseSchema
 >;
-
-export const nurtureListResponseSchema = z.object({
-  data: z.array(allocationBoardCardSchema),
-});
-export type NurtureListResponse = z.infer<typeof nurtureListResponseSchema>;

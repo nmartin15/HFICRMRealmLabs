@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   addCalendarDays,
   decide,
-  defaultNurtureFollowUpAt,
   type DecideInput,
 } from "./routing";
 
@@ -53,7 +52,7 @@ describe("decide route_incubator", () => {
       },
       person: null,
       incubator: {
-        stage: "routed",
+        stage: "sent",
         tier: null,
         priceUsd: null,
         routingDetail: "strong operator",
@@ -149,7 +148,6 @@ describe("decide pass", () => {
           decision: "pass",
           doNotContact: true,
           passReason: "asked not to be contacted",
-          nurture: true,
         }),
       ),
     ).toEqual({
@@ -165,50 +163,8 @@ describe("decide pass", () => {
     });
   });
 
-  it("defaults nurture to true and follow-up to today plus 90 days", () => {
+  it("sets passed when doNotContact is false", () => {
     expect(decide(input({ decision: "pass" }))).toEqual({
-      ok: true,
-      allocation: {
-        stage: "nurture",
-        decision: "pass",
-        passReason: null,
-        nurtureFollowUpAt: defaultNurtureFollowUpAt(TODAY),
-      },
-      person: null,
-      incubator: null,
-    });
-    expect(defaultNurtureFollowUpAt(TODAY)).toBe("2026-11-22");
-  });
-
-  it("uses the provided nurture_follow_up_at when nurturing", () => {
-    expect(
-      decide(
-        input({
-          decision: "pass",
-          doNotContact: false,
-          nurture: true,
-          nurtureFollowUpAt: "2026-12-01",
-        }),
-      ),
-    ).toMatchObject({
-      ok: true,
-      allocation: {
-        stage: "nurture",
-        nurtureFollowUpAt: "2026-12-01",
-      },
-    });
-  });
-
-  it("sets passed when doNotContact is false and nurture is false", () => {
-    expect(
-      decide(
-        input({
-          decision: "pass",
-          doNotContact: false,
-          nurture: false,
-        }),
-      ),
-    ).toEqual({
       ok: true,
       allocation: {
         stage: "passed",
@@ -222,7 +178,7 @@ describe("decide pass", () => {
   });
 });
 
-describe("nurture follow-up date math", () => {
+describe("follow-up date math", () => {
   it("adds calendar days across month boundaries", () => {
     expect(addCalendarDays("2026-01-31", 1)).toBe("2026-02-01");
     expect(addCalendarDays("2026-08-24", 90)).toBe("2026-11-22");

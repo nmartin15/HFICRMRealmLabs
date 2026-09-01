@@ -23,7 +23,7 @@ function card(overrides: Partial<WebhookCard> = {}): WebhookCard {
   return {
     id: CARD_ID,
     personId: PERSON_ID,
-    stage: "routed",
+    stage: "sent",
     applicationRef: null,
     priceUsd: null,
     ...overrides,
@@ -72,7 +72,7 @@ describe("decideApplicationWebhook", () => {
     expect(
       decideApplicationWebhook({
         applicationRef: "APP-1",
-        cardByRef: card({ applicationRef: "APP-1", stage: "application_received" }),
+        cardByRef: card({ applicationRef: "APP-1", stage: "applied" }),
         personByEmail: person(),
       }),
     ).toEqual({
@@ -88,28 +88,28 @@ describe("decideApplicationWebhook", () => {
       decideApplicationWebhook({
         applicationRef: "APP-1",
         cardByRef: null,
-        personByEmail: person({ incubatorCard: card({ stage: "routed" }) }),
+        personByEmail: person({ incubatorCard: card({ stage: "sent" }) }),
       }),
     ).toEqual({
       action: "update",
       personId: PERSON_ID,
       cardId: CARD_ID,
-      fromStage: "routed",
+      fromStage: "sent",
       needsReview: false,
     });
   });
 
   it("updates a person whose incubator card is Application Sent", () => {
-    expect(isApplicationWebhookEligibleStage("application_sent")).toBe(true);
+    expect(isApplicationWebhookEligibleStage("sent")).toBe(true);
     expect(
       decideApplicationWebhook({
         applicationRef: "APP-1",
         cardByRef: null,
         personByEmail: person({
-          incubatorCard: card({ stage: "application_sent" }),
+          incubatorCard: card({ stage: "sent" }),
         }),
       }),
-    ).toMatchObject({ action: "update", fromStage: "application_sent" });
+    ).toMatchObject({ action: "update", fromStage: "sent" });
   });
 
   it("creates and flags for review when no person exists", () => {
@@ -128,14 +128,14 @@ describe("decideApplicationWebhook", () => {
         applicationRef: "APP-1",
         cardByRef: null,
         personByEmail: person({
-          incubatorCard: card({ stage: "offer_made" }),
+          incubatorCard: card({ stage: "approved" }),
         }),
       }),
     ).toEqual({
       action: "flag",
       personId: PERSON_ID,
       cardId: CARD_ID,
-      fromStage: "offer_made",
+      fromStage: "approved",
       needsReview: true,
     });
     expect(
@@ -181,7 +181,7 @@ describe("decideStripeCheckout", () => {
         eventType: STRIPE_CHECKOUT_SESSION_COMPLETED,
         customerEmail: "ada@example.com",
         amountTotal: 500000,
-        card: card({ stage: "offer_made", priceUsd: 5000 }),
+        card: card({ stage: "applied", priceUsd: 5000 }),
       }),
     ).toEqual({ action: "disabled" });
   });
@@ -193,7 +193,7 @@ describe("decideStripeCheckout", () => {
         eventType: "customer.created",
         customerEmail: "ada@example.com",
         amountTotal: 500000,
-        card: card({ stage: "offer_made" }),
+        card: card({ stage: "applied" }),
       }),
     ).toEqual({ action: "ignore" });
   });
@@ -206,25 +206,25 @@ describe("decideStripeCheckout", () => {
         eventType: STRIPE_CHECKOUT_SESSION_COMPLETED,
         customerEmail: "Ada@Example.COM",
         amountTotal: 500000,
-        card: card({ stage: "offer_made", priceUsd: 5000 }),
+        card: card({ stage: "applied", priceUsd: 5000 }),
       }),
     ).toEqual({
       action: "paid",
       personId: PERSON_ID,
       cardId: CARD_ID,
-      fromStage: "offer_made",
+      fromStage: "applied",
       priceUsd: 5000,
     });
   });
 
-  it("ignores checkout when no offer_made card matches", () => {
+  it("ignores checkout when no applied card matches", () => {
     expect(
       decideStripeCheckout({
         enabled: true,
         eventType: STRIPE_CHECKOUT_SESSION_COMPLETED,
         customerEmail: "ada@example.com",
         amountTotal: 500000,
-        card: card({ stage: "application_received" }),
+        card: card({ stage: "sent" }),
       }),
     ).toEqual({ action: "ignore" });
     expect(

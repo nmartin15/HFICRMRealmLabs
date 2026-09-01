@@ -8,7 +8,6 @@ import {
   homeCounts,
   homeSnapshotResponseSchema,
   isIncubatorWaitingStage,
-  isNurtureDue,
   meetingDigestPersonSchema,
   meetingSchema,
   todayBoundsUtc,
@@ -17,7 +16,7 @@ import {
   type HomeCallInput,
   type HomeDecisionInput,
   type HomeIncubatorInput,
-  type HomeNurtureInput,
+  type HomeOpenTaskInput,
   type MeetingDigestItem,
 } from "@realm-labs/contracts";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
@@ -28,6 +27,7 @@ import {
   incubatorCards,
   meetings,
   people,
+  tasks,
 } from "@realm-labs/db";
 import { emailThreadsVisibleSql } from "../lib/email-visibility.js";
 import {
@@ -78,9 +78,9 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         unmatchedRows,
         todayEmailRows,
         allocationRows,
-        nurtureRows,
         incubatorRows,
         upcomingMeetingRows,
+        openTaskRows,
       ] = await Promise.all([
         app.db
           .select({ meeting: meetings, person: people })
@@ -155,18 +155,6 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
             ),
           ),
         app.db
-          .select({ card: allocationCards, person: people })
-          .from(allocationCards)
-          .innerJoin(people, eq(allocationCards.personId, people.id))
-          .where(
-            and(
-              isNull(people.deletedAt),
-              eq(people.doNotContact, false),
-              eq(allocationCards.stage, "nurture"),
-            ),
-          )
-          .orderBy(asc(allocationCards.nurtureFollowUpAt)),
-        app.db
           .select({ card: incubatorCards, person: people })
           .from(incubatorCards)
           .innerJoin(people, eq(incubatorCards.personId, people.id))
@@ -175,8 +163,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
               isNull(people.deletedAt),
               eq(people.doNotContact, false),
               inArray(incubatorCards.stage, [
-                "application_received",
-                "offer_made",
+                "applied",
               ]),
             ),
           ),
@@ -190,6 +177,19 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
             ),
           )
           .orderBy(asc(meetings.scheduledAt)),
+        app.db
+          .select({ task: tasks, person: people })
+          .from(tasks)
+          .innerJoin(people, eq(tasks.personId, people.id))
+          .where(
+            and(
+              eq(tasks.status, "open"),
+              lt(tasks.dueAt, today.end),
+              isNull(people.deletedAt),
+              eq(people.doNotContact, false),
+            ),
+          )
+          .orderBy(asc(tasks.dueAt)),
       ]);
 
       const leftoverMeetings: MeetingDigestItem[] = leftoverRows.map((row) => ({
@@ -213,6 +213,19 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         skipCallPersonIds.add(item.person.id);
       }
 
+      const openTasks: HomeOpenTaskInput[] = openTaskRows.map((row) => {
+        if (row.task.kind === "call" || row.task.kind === "meeting") {
+          skipCallPersonIds.add(row.person.id);
+        }
+        return {
+          id: row.task.id,
+          person: digestPerson(serializePerson(row.person)),
+          kind: row.task.kind,
+          dueAt: row.task.dueAt.toISOString(),
+          notes: row.task.notes,
+        };
+      });
+
       const callsDue: HomeCallInput[] = [];
       const decisions: HomeDecisionInput[] = [];
       for (const row of allocationRows) {
@@ -235,13 +248,6 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           stageLabel: ALLOCATION_STAGE_LABELS[row.card.stage],
         });
       }
-
-      const nurtureDue: HomeNurtureInput[] = nurtureRows
-        .filter((row) => isNurtureDue(row.card.nurtureFollowUpAt, todayYmd))
-        .map((row) => ({
-          person: digestPerson(serializePerson(row.person)),
-          followUpAt: row.card.nurtureFollowUpAt,
-        }));
 
       const incubatorWaiting: HomeIncubatorInput[] = incubatorRows.flatMap(
         (row) => {
@@ -270,10 +276,10 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
       const todos = buildHomeTodos({
         leftoverMeetings,
         todayMeetings,
+        openTasks,
         unmatchedEmails,
         callsDue,
         decisions,
-        nurtureDue,
         incubatorWaiting,
         now,
       });

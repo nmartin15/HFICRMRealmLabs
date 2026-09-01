@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildHomeTodos,
   homeCounts,
-  isNurtureDue,
   meetingNeedsOutcome,
 } from "./home";
 import type { MeetingDigestItem } from "./meetings";
@@ -46,13 +45,6 @@ describe("home day snapshot", () => {
     );
   });
 
-  it("marks nurture due today or earlier, including missing dates", () => {
-    expect(isNurtureDue(null, "2026-08-24")).toBe(true);
-    expect(isNurtureDue("2026-08-24", "2026-08-24")).toBe(true);
-    expect(isNurtureDue("2026-08-23", "2026-08-24")).toBe(true);
-    expect(isNurtureDue("2026-08-25", "2026-08-24")).toBe(false);
-  });
-
   it("builds todos for meetings, calls, emails, and board tasks", () => {
     const now = new Date("2026-08-25T18:00:00.000Z");
     const leftover = meetingItem("2026-08-24T17:00:00.000Z");
@@ -64,6 +56,15 @@ describe("home day snapshot", () => {
     const todos = buildHomeTodos({
       leftoverMeetings: [leftover],
       todayMeetings: [todayPast, todayUpcoming],
+      openTasks: [
+        {
+          id: "77777777-7777-4777-8777-777777777777",
+          person,
+          kind: "email",
+          dueAt: "2026-08-25T15:00:00.000Z",
+          notes: "Send intro",
+        },
+      ],
       unmatchedEmails: [
         {
           id: "66666666-6666-4666-8666-666666666666",
@@ -74,16 +75,15 @@ describe("home day snapshot", () => {
       ],
       callsDue: [{ person, stageLabel: "In Conversation" }],
       decisions: [{ person }],
-      nurtureDue: [{ person, followUpAt: "2026-08-24" }],
-      incubatorWaiting: [{ person, stage: "offer_made" }],
+      incubatorWaiting: [{ person, stage: "applied" }],
       now,
     });
 
     expect(todos.map((item) => item.kind)).toEqual([
       "close_meeting",
       "close_meeting",
+      "task",
       "email",
-      "nurture",
       "call",
       "decision",
       "incubator",

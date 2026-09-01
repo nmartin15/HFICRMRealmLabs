@@ -1,23 +1,12 @@
 import type { BudgetQualified, IncubatorStage, IncubatorTierName } from "./enums";
-import { resolveIncubatorPrice } from "./routing";
 
-export const INCUBATOR_OPEN_STAGES = [
-  "routed",
-  "application_sent",
-  "application_received",
-  "offer_made",
-  "paid",
-  "enrolled",
-] as const;
+export const INCUBATOR_OPEN_STAGES = ["sent", "applied", "approved"] as const;
 export type IncubatorOpenStage = (typeof INCUBATOR_OPEN_STAGES)[number];
 
 export const INCUBATOR_STAGE_WEIGHTS: Record<IncubatorOpenStage, number> = {
-  routed: 0.1,
-  application_sent: 0.25,
-  application_received: 0.4,
-  offer_made: 0.6,
-  paid: 1.0,
-  enrolled: 1.0,
+  sent: 0.25,
+  applied: 0.4,
+  approved: 1.0,
 };
 
 export function isIncubatorOpenStage(
@@ -30,11 +19,8 @@ export function incubatorTierLabel(tier: IncubatorTierName): string {
   return tier.replace("_", " ");
 }
 
-export function canEnterApplicationSent(input: {
-  budgetQualified: BudgetQualified;
-  noCallAppLink: boolean;
-}): boolean {
-  return input.budgetQualified === "yes" || input.noCallAppLink;
+export function isBudgetQualified(value: BudgetQualified): boolean {
+  return value === "light" || value === "heavy";
 }
 
 export type IncubatorMoveInput = {
@@ -46,10 +32,7 @@ export type IncubatorMoveInput = {
   tier: IncubatorTierName | null;
   priceUsd: number | null;
   closeReason?: string;
-  confirmPaid?: boolean;
   nextApplicationRef?: string;
-  nextTier?: IncubatorTierName;
-  nextPriceUsd?: number;
 };
 
 export type IncubatorMoveError = {
@@ -94,25 +77,25 @@ export function evaluateIncubatorMove(
       tier: input.tier,
       priceUsd: input.priceUsd,
       closeReason: input.closeReason ? trimmed(input.closeReason) : null,
-      closed: input.from === "closed",
+      closed: input.from === "rejected",
     };
   }
 
-  if (input.from === "closed") {
+  if (input.from === "rejected") {
     return fail(
       "INVALID_STAGE_MOVE",
-      "Closed incubator cards cannot be moved",
+      "Rejected incubator cards cannot be moved",
     );
   }
 
-  if (input.to === "closed") {
+  if (input.to === "rejected") {
     const closeReason = trimmed(input.closeReason);
     if (!closeReason) {
       return fail("CLOSE_REASON_REQUIRED", "close_reason is required");
     }
     return {
       ok: true,
-      stage: "closed",
+      stage: "rejected",
       applicationRef: input.applicationRef,
       tier: input.tier,
       priceUsd: input.priceUsd,
@@ -125,74 +108,23 @@ export function evaluateIncubatorMove(
     return fail("INVALID_STAGE_MOVE", "Unknown incubator stage");
   }
 
-  if (input.to === "application_sent") {
-    if (
-      !canEnterApplicationSent({
-        budgetQualified: input.budgetQualified,
-        noCallAppLink: input.noCallAppLink,
-      })
-    ) {
-      return fail(
-        "BUDGET_OR_NO_CALL_REQUIRED",
-        "Move to Application Sent requires budget qualified or an app link sent without a call",
-      );
-    }
-  }
-
   let applicationRef = input.applicationRef;
-  if (input.to === "application_received") {
+  if (input.to === "applied") {
     applicationRef = trimmed(input.nextApplicationRef) ?? input.applicationRef;
     if (!applicationRef) {
       return fail(
         "APPLICATION_REF_REQUIRED",
-        "application_ref is required to move to Application Received",
+        "application_ref is required to move to Applied",
       );
     }
-  }
-
-  let tier = input.tier;
-  let priceUsd = input.priceUsd;
-  if (input.to === "offer_made") {
-    const nextTier = input.nextTier ?? input.tier ?? undefined;
-    if (!nextTier) {
-      return fail(
-        "TIER_AND_PRICE_REQUIRED",
-        "tier and price_usd are required to move to Offer Made",
-      );
-    }
-    const nextPrice =
-      input.nextPriceUsd !== undefined
-        ? input.nextPriceUsd
-        : input.nextTier !== undefined
-          ? undefined
-          : (input.priceUsd ?? undefined);
-    const price = resolveIncubatorPrice(nextTier, nextPrice);
-    if (!price.ok) {
-      return fail(price.code, price.message);
-    }
-    if (price.priceUsd === null) {
-      return fail(
-        "TIER_AND_PRICE_REQUIRED",
-        "tier and price_usd are required to move to Offer Made",
-      );
-    }
-    tier = nextTier;
-    priceUsd = price.priceUsd;
-  }
-
-  if (input.to === "paid" && input.confirmPaid !== true) {
-    return fail(
-      "PAID_CONFIRMATION_REQUIRED",
-      "Marking Paid requires confirmation",
-    );
   }
 
   return {
     ok: true,
     stage: input.to,
     applicationRef,
-    tier,
-    priceUsd,
+    tier: input.tier,
+    priceUsd: input.priceUsd,
     closeReason: null,
     closed: false,
   };
@@ -241,12 +173,9 @@ export function incubatorBoardTotals(
   columns: Record<IncubatorOpenStage, { count: number; priceUsd: number }>;
 } {
   const columnStats = {
-    routed: incubatorColumnValue(columns.routed),
-    application_sent: incubatorColumnValue(columns.application_sent),
-    application_received: incubatorColumnValue(columns.application_received),
-    offer_made: incubatorColumnValue(columns.offer_made),
-    paid: incubatorColumnValue(columns.paid),
-    enrolled: incubatorColumnValue(columns.enrolled),
+    sent: incubatorColumnValue(columns.sent),
+    applied: incubatorColumnValue(columns.applied),
+    approved: incubatorColumnValue(columns.approved),
   };
   const pipeline = incubatorPipelineValue(
     INCUBATOR_OPEN_STAGES.flatMap((stage) =>

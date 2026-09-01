@@ -30,10 +30,33 @@ export const personSourceEnum = pgEnum("person_source", [
   "referral",
   "other",
 ]);
-export const leadTempEnum = pgEnum("lead_temp", ["hot", "warm", "cold"]);
+export const programTrackEnum = pgEnum("program_track", [
+  "allocation",
+  "incubator",
+  "recruitment",
+  "capital_raising",
+]);
+export const taskKindEnum = pgEnum("task_kind", [
+  "email",
+  "call",
+  "meeting",
+  "dnc",
+]);
+export const taskStatusEnum = pgEnum("task_status", [
+  "open",
+  "done",
+  "rescheduled",
+]);
+export const leadTempEnum = pgEnum("lead_temp", [
+  "cold",
+  "lukewarm",
+  "warm",
+  "hot",
+]);
 export const budgetQualifiedEnum = pgEnum("budget_qualified", [
-  "yes",
-  "no",
+  "light",
+  "heavy",
+  "not_qualified",
   "unknown",
 ]);
 export const allocationStageEnum = pgEnum("allocation_stage", [
@@ -51,13 +74,10 @@ export const allocationDecisionEnum = pgEnum("allocation_decision", [
   "pass",
 ]);
 export const incubatorStageEnum = pgEnum("incubator_stage", [
-  "routed",
-  "application_sent",
-  "application_received",
-  "offer_made",
-  "paid",
-  "enrolled",
-  "closed",
+  "sent",
+  "applied",
+  "approved",
+  "rejected",
 ]);
 export const incubatorTierEnum = pgEnum("incubator_tier", [
   "tier_1",
@@ -104,8 +124,11 @@ export const people = pgTable(
     location: text("location"),
     source: personSourceEnum("source").notNull(),
     resumeUrl: text("resume_url"),
+    resumeFilename: text("resume_filename"),
+    resumeContentType: text("resume_content_type"),
     appliedAt: date("applied_at", { mode: "string" }),
     notes: text("notes"),
+    programTrack: programTrackEnum("program_track"),
     leadTemp: leadTempEnum("lead_temp"),
     budgetQualified: budgetQualifiedEnum("budget_qualified")
       .notNull()
@@ -152,6 +175,21 @@ export const incubatorCards = pgTable("incubator_cards", {
   routedAt: timestamp("routed_at", { withTimezone: true, mode: "date" }).notNull(),
   closeReason: text("close_reason"),
   closedAt: timestamp("closed_at", { withTimezone: true, mode: "date" }),
+  ...timestamps,
+});
+
+export const tasks = pgTable("tasks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  personId: uuid("person_id")
+    .notNull()
+    .references(() => people.id),
+  kind: taskKindEnum("kind").notNull(),
+  dueAt: timestamp("due_at", { withTimezone: true, mode: "date" }).notNull(),
+  notes: text("notes"),
+  status: taskStatusEnum("status").notNull().default("open"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
   ...timestamps,
 });
 
@@ -251,6 +289,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   ownedPeople: many(people),
   allocationDecisions: many(allocationCards),
   meetingsCreated: many(meetings),
+  tasksCreated: many(tasks),
   activities: many(activities),
   reportInputs: many(reportInputs),
   mailboxConnections: many(mailboxConnections),
@@ -270,6 +309,7 @@ export const peopleRelations = relations(people, ({ one, many }) => ({
     references: [incubatorCards.personId],
   }),
   meetings: many(meetings),
+  tasks: many(tasks),
   emailThreads: many(emailThreads),
   activities: many(activities),
 }));
@@ -289,6 +329,17 @@ export const incubatorCardsRelations = relations(incubatorCards, ({ one }) => ({
   person: one(people, {
     fields: [incubatorCards.personId],
     references: [people.id],
+  }),
+}));
+
+export const tasksRelations = relations(tasks, ({ one }) => ({
+  person: one(people, {
+    fields: [tasks.personId],
+    references: [people.id],
+  }),
+  createdByUser: one(users, {
+    fields: [tasks.createdBy],
+    references: [users.id],
   }),
 }));
 

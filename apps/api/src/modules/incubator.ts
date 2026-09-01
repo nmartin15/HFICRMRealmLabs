@@ -1,5 +1,7 @@
 import {
   canViewCard,
+  createApplicantResponseSchema,
+  createIncubatorApplicantBodySchema,
   daysInStage,
   evaluateIncubatorMove,
   incubatorBoardCardSchema,
@@ -26,33 +28,29 @@ import {
   serializePerson,
   stageAfterFromPayload,
 } from "../lib/serialize.js";
+import { createManualApplicant } from "../lib/applicants.js";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
 import { writeActivity } from "../lib/activity.js";
 
 type IncubatorBoardColumns = {
-  routed: IncubatorBoardCard[];
-  application_sent: IncubatorBoardCard[];
-  application_received: IncubatorBoardCard[];
-  offer_made: IncubatorBoardCard[];
-  paid: IncubatorBoardCard[];
-  enrolled: IncubatorBoardCard[];
+  sent: IncubatorBoardCard[];
+  applied: IncubatorBoardCard[];
+  approved: IncubatorBoardCard[];
 };
 
 function emptyColumns(): IncubatorBoardColumns {
   return {
-    routed: [],
-    application_sent: [],
-    application_received: [],
-    offer_made: [],
-    paid: [],
-    enrolled: [],
+    sent: [],
+    applied: [],
+    approved: [],
   };
 }
 
 const listedPeople = and(
   isNull(people.deletedAt),
   eq(people.doNotContact, false),
+  eq(people.programTrack, "incubator"),
 );
 
 async function requireIncubatorCard(db: Database, id: string) {
@@ -132,6 +130,7 @@ async function toBoardCards(
         firstName: person.firstName,
         lastName: person.lastName,
         budgetQualified: person.budgetQualified,
+        programTrack: person.programTrack,
       },
       noCallAppLink: row.noCallAppLink ?? false,
       daysInStage: daysInStage(enteredAt, now),
@@ -178,23 +177,32 @@ export const incubatorRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const totals = incubatorBoardTotals({
-        routed: columns.routed.map((item) => ({ priceUsd: item.card.priceUsd })),
-        application_sent: columns.application_sent.map((item) => ({
+        sent: columns.sent.map((item) => ({ priceUsd: item.card.priceUsd })),
+        applied: columns.applied.map((item) => ({
           priceUsd: item.card.priceUsd,
         })),
-        application_received: columns.application_received.map((item) => ({
-          priceUsd: item.card.priceUsd,
-        })),
-        offer_made: columns.offer_made.map((item) => ({
-          priceUsd: item.card.priceUsd,
-        })),
-        paid: columns.paid.map((item) => ({ priceUsd: item.card.priceUsd })),
-        enrolled: columns.enrolled.map((item) => ({
+        approved: columns.approved.map((item) => ({
           priceUsd: item.card.priceUsd,
         })),
       });
 
       return incubatorBoardResponseSchema.parse({ columns, closed, totals });
+    },
+  );
+
+  app.post(
+    "/incubator",
+    {
+      schema: {
+        body: createIncubatorApplicantBodySchema,
+        response: { 200: createApplicantResponseSchema },
+      },
+    },
+    async (req) => {
+      const actor = requireUser(req);
+      return createApplicantResponseSchema.parse(
+        await createManualApplicant(app.db, actor, "incubator", req.body),
+      );
     },
   );
 
@@ -236,10 +244,7 @@ export const incubatorRoutes: FastifyPluginAsyncZod = async (app) => {
         tier: card.tier,
         priceUsd: card.priceUsd,
         closeReason: req.body.closeReason,
-        confirmPaid: req.body.confirmPaid,
         nextApplicationRef: req.body.applicationRef,
-        nextTier: req.body.tier,
-        nextPriceUsd: req.body.priceUsd,
       });
 
       if (!result.ok) {
@@ -265,6 +270,13 @@ export const incubatorRoutes: FastifyPluginAsyncZod = async (app) => {
         .returning();
       if (!updated) {
         throw httpError(404, "NOT_FOUND", "Incubator card not found");
+      }
+
+      if (result.closed) {
+        await app.db
+          .update(people)
+          .set({ programTrack: null })
+          .where(eq(people.id, card.personId));
       }
 
       await writeActivity(app.db, {

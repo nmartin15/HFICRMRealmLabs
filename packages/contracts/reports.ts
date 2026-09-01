@@ -363,12 +363,14 @@ export function computeReport(input: ComputeReportInput): ReportResponse {
   const qualifiedIncubatorNotBudget = countHeldPeople(
     (person) =>
       person.allocationDecision === "route_incubator" &&
-      person.budgetQualified !== "yes",
+      person.budgetQualified !== "light" &&
+      person.budgetQualified !== "heavy",
   );
   const budgetQualifiedIncubator = countHeldPeople(
     (person) =>
       person.allocationDecision === "route_incubator" &&
-      person.budgetQualified === "yes",
+      (person.budgetQualified === "light" ||
+        person.budgetQualified === "heavy"),
   );
   const qualifiedForAllocation = countHeldPeople(
     (person) => person.allocationDecision === "allocate",

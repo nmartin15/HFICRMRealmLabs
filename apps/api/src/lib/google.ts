@@ -59,12 +59,50 @@ export type GoogleMailboxGrant = GoogleProfile & {
   refreshToken: string;
 };
 
+type GoogleTokenError = {
+  message?: string;
+  response?: {
+    data?: {
+      error?: string;
+      error_description?: string;
+    };
+  };
+};
+
+export function googleAuthErrorMessage(err: unknown): string {
+  if (!err || typeof err !== "object") {
+    return "Google sign-in failed";
+  }
+  const googleErr = err as GoogleTokenError;
+  const code = googleErr.response?.data?.error ?? googleErr.message;
+  if (code === "invalid_client") {
+    return "Google rejected the OAuth client secret. Copy GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET from the same Web client in Google Cloud Console, then restart the API.";
+  }
+  return (
+    googleErr.response?.data?.error_description ??
+    googleErr.message ??
+    "Google sign-in failed"
+  );
+}
+
+async function exchangeCode(env: Env, redirectUri: string, code: string) {
+  const oauth2 = createOAuthClient(env, redirectUri);
+  try {
+    return { oauth2, tokens: (await oauth2.getToken(code)).tokens };
+  } catch (err) {
+    throw new Error(googleAuthErrorMessage(err));
+  }
+}
+
 export async function exchangeGoogleCode(
   env: Env,
   code: string,
 ): Promise<GoogleProfile> {
-  const oauth2 = createOAuthClient(env, env.GOOGLE_REDIRECT_URI);
-  const { tokens } = await oauth2.getToken(code);
+  const { oauth2, tokens } = await exchangeCode(
+    env,
+    env.GOOGLE_REDIRECT_URI,
+    code,
+  );
   oauth2.setCredentials(tokens);
 
   const oauth2Api = google.oauth2({ version: "v2", auth: oauth2 });
@@ -82,8 +120,11 @@ export async function exchangeGoogleMailboxCode(
   env: Env,
   code: string,
 ): Promise<GoogleMailboxGrant> {
-  const oauth2 = createOAuthClient(env, env.GOOGLE_MAILBOX_REDIRECT_URI);
-  const { tokens } = await oauth2.getToken(code);
+  const { oauth2, tokens } = await exchangeCode(
+    env,
+    env.GOOGLE_MAILBOX_REDIRECT_URI,
+    code,
+  );
   const refreshToken = tokens.refresh_token;
   if (!refreshToken) {
     throw new Error(

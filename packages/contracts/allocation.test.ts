@@ -91,12 +91,14 @@ describe("current board badge", () => {
   it("prefers an active incubator card, including after route_incubator", () => {
     expect(
       currentBoardBadge({
+        programTrack: "incubator",
+        doNotContact: false,
         allocationStage: "decision",
-        incubatorStage: "routed",
+        incubatorStage: "sent",
       }),
     ).toEqual({
       board: "incubator",
-      stage: "routed",
+      stage: "sent",
       href: "/incubator",
     });
   });
@@ -104,6 +106,8 @@ describe("current board badge", () => {
   it("uses allocation when there is no incubator", () => {
     expect(
       currentBoardBadge({
+        programTrack: "allocation",
+        doNotContact: false,
         allocationStage: "in_conversation",
         incubatorStage: null,
       }),
@@ -117,6 +121,8 @@ describe("current board badge", () => {
   it("shows a closed allocation card when there is no incubator", () => {
     expect(
       currentBoardBadge({
+        programTrack: "allocation",
+        doNotContact: false,
         allocationStage: "passed",
         incubatorStage: null,
       }),
