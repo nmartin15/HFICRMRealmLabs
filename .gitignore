@@ -16,3 +16,4 @@ credentials.json
 .vercel
 coverage
 *.tsbuildinfo
+tmp-applicant-sheet.csv
