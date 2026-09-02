@@ -1,11 +1,15 @@
 import { z } from "zod";
 import {
   isoDateTimeSchema,
+  meetingOutcomeSchema,
   taskKindSchema,
   taskStatusSchema,
   uuidSchema,
+  type MeetingOutcome,
   type TaskKind,
+  type TaskStatus,
 } from "./enums";
+import { HAND_SET_MEETING_OUTCOMES, handSetMeetingOutcomeSchema } from "./meetings";
 
 export const TASK_KIND_LABELS: Record<TaskKind, string> = {
   email: "Email",
@@ -21,6 +25,9 @@ export const taskSchema = z.object({
   dueAt: isoDateTimeSchema,
   notes: z.string().nullable(),
   status: taskStatusSchema,
+  calendarEventId: z.string().nullable(),
+  outcome: meetingOutcomeSchema.nullable(),
+  needsReview: z.boolean(),
   createdBy: uuidSchema,
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -36,6 +43,7 @@ export type CreateTaskBody = z.infer<typeof createTaskBodySchema>;
 
 export const completeTaskBodySchema = z.object({
   notes: z.string().trim().optional(),
+  outcome: handSetMeetingOutcomeSchema.optional(),
   next: z
     .object({
       kind: taskKindSchema,
@@ -82,6 +90,8 @@ export type PlanCompleteTaskSuccess = {
   ok: true;
   notes: string | null;
   setDoNotContact: boolean;
+  status: Extract<TaskStatus, "done" | "rescheduled">;
+  outcome: MeetingOutcome | null;
   next: {
     kind: TaskKind;
     dueAt: string;
@@ -134,6 +144,7 @@ export function planCompleteTask(input: {
   currentKind: TaskKind;
   currentStatus: string;
   notes: string | null | undefined;
+  outcome: (typeof HAND_SET_MEETING_OUTCOMES)[number] | undefined;
   next: { kind: TaskKind; dueAt: string; notes?: string } | undefined;
   personDoNotContact: boolean;
   personDeleted: boolean;
@@ -156,15 +167,33 @@ export function planCompleteTask(input: {
       ok: true,
       notes,
       setDoNotContact: true,
+      status: "done",
+      outcome: null,
       next: null,
     };
   }
+
+  if (input.currentKind === "meeting") {
+    if (!input.outcome) {
+      return fail(
+        400,
+        "MEETING_OUTCOME_REQUIRED",
+        "Closing a meeting requires Held, No show, or Rescheduled",
+      );
+    }
+  }
+
+  const outcome = input.currentKind === "meeting" ? input.outcome ?? null : null;
+  const status: Extract<TaskStatus, "done" | "rescheduled"> =
+    outcome === "rescheduled" ? "rescheduled" : "done";
 
   if (input.personDoNotContact) {
     return {
       ok: true,
       notes,
       setDoNotContact: false,
+      status,
+      outcome,
       next: null,
     };
   }
@@ -186,6 +215,8 @@ export function planCompleteTask(input: {
     ok: true,
     notes,
     setDoNotContact: input.next.kind === "dnc",
+    status,
+    outcome,
     next: {
       kind: input.next.kind,
       dueAt: input.next.dueAt,

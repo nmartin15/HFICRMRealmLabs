@@ -12,8 +12,6 @@ import {
 const base: IncubatorMoveInput = {
   from: "sent",
   to: "sent",
-  budgetQualified: "unknown",
-  noCallAppLink: false,
   applicationRef: null,
   tier: null,
   priceUsd: null,

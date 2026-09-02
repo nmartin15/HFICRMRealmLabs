@@ -11,6 +11,7 @@ import { desc, eq } from "drizzle-orm";
 import { reportInputs } from "@realm-labs/db";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
+import { writeActivity } from "../lib/activity.js";
 
 function serializeReportInput(row: typeof reportInputs.$inferSelect) {
   return {
@@ -56,7 +57,7 @@ export const reportInputRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (req) => {
-      const user = requireUser(req);
+      const actor = requireUser(req);
       const [created] = await app.db
         .insert(reportInputs)
         .values({
@@ -64,14 +65,31 @@ export const reportInputRoutes: FastifyPluginAsyncZod = async (app) => {
           periodEnd: req.body.periodEnd,
           linkedinImpressions: req.body.linkedinImpressions,
           jobPostApplies: req.body.jobPostApplies,
-          createdBy: user.id,
+          createdBy: actor.id,
         })
         .returning();
       if (!created) {
         throw httpError(500, "INTERNAL", "Failed to create report input");
       }
 
-      // TODO: activities.person_id is required, so report input mutations cannot write an activity row.
+      await writeActivity(app.db, {
+        personId: null,
+        userId: actor.id,
+        type: "field_change",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "report_input.create",
+          when: new Date().toISOString(),
+          before: null,
+          after: {
+            id: created.id,
+            periodStart: created.periodStart,
+            periodEnd: created.periodEnd,
+            linkedinImpressions: created.linkedinImpressions,
+            jobPostApplies: created.jobPostApplies,
+          },
+        },
+      });
 
       return reportInputSchema.parse(serializeReportInput(created));
     },
@@ -87,7 +105,7 @@ export const reportInputRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (req) => {
-      requireUser(req);
+      const actor = requireUser(req);
       const { id } = req.params;
       const existing = await app.db
         .select()
@@ -120,7 +138,28 @@ export const reportInputRoutes: FastifyPluginAsyncZod = async (app) => {
         throw httpError(404, "NOT_FOUND", "Report input not found");
       }
 
-      // TODO: activities.person_id is required, so report input mutations cannot write an activity row.
+      await writeActivity(app.db, {
+        personId: null,
+        userId: actor.id,
+        type: "field_change",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "report_input.update",
+          when: new Date().toISOString(),
+          before: {
+            periodStart: existing[0].periodStart,
+            periodEnd: existing[0].periodEnd,
+            linkedinImpressions: existing[0].linkedinImpressions,
+            jobPostApplies: existing[0].jobPostApplies,
+          },
+          after: {
+            periodStart: updated.periodStart,
+            periodEnd: updated.periodEnd,
+            linkedinImpressions: updated.linkedinImpressions,
+            jobPostApplies: updated.jobPostApplies,
+          },
+        },
+      });
 
       return reportInputSchema.parse(serializeReportInput(updated));
     },
@@ -135,8 +174,17 @@ export const reportInputRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (req) => {
-      requireUser(req);
+      const actor = requireUser(req);
       const { id } = req.params;
+      const existing = await app.db
+        .select()
+        .from(reportInputs)
+        .where(eq(reportInputs.id, id))
+        .limit(1);
+      const current = existing[0];
+      if (!current) {
+        throw httpError(404, "NOT_FOUND", "Report input not found");
+      }
       const deleted = await app.db
         .delete(reportInputs)
         .where(eq(reportInputs.id, id))
@@ -145,7 +193,22 @@ export const reportInputRoutes: FastifyPluginAsyncZod = async (app) => {
         throw httpError(404, "NOT_FOUND", "Report input not found");
       }
 
-      // TODO: activities.person_id is required, so report input mutations cannot write an activity row.
+      await writeActivity(app.db, {
+        personId: null,
+        userId: actor.id,
+        type: "field_change",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "report_input.delete",
+          when: new Date().toISOString(),
+          before: {
+            id: current.id,
+            periodStart: current.periodStart,
+            periodEnd: current.periodEnd,
+          },
+          after: null,
+        },
+      });
 
       return { ok: true as const };
     },

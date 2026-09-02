@@ -2,38 +2,39 @@ import {
   ALLOCATION_STAGE_LABELS,
   buildHomeTodos,
   canViewCard,
-  canViewEmailThread,
   canViewMeeting,
   emailThreadSchema,
   homeCounts,
   homeSnapshotResponseSchema,
   isIncubatorWaitingStage,
   meetingDigestPersonSchema,
-  meetingSchema,
   todayBoundsUtc,
-  yesterdayBoundsUtc,
   zonedIsoDate,
   type HomeCallInput,
   type HomeDecisionInput,
   type HomeIncubatorInput,
   type HomeOpenTaskInput,
-  type MeetingDigestItem,
+  type HomePersonInput,
+  type HomeScheduleItem,
 } from "@realm-labs/contracts";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import {
   allocationCards,
   emailThreads,
   incubatorCards,
-  meetings,
   people,
   tasks,
 } from "@realm-labs/db";
-import { emailThreadsVisibleSql } from "../lib/email-visibility.js";
+import {
+  emailThreadRowVisible,
+  emailThreadsVisibleSql,
+  loadPersonalMailboxOwner,
+} from "../lib/email-visibility.js";
 import {
   serializeEmailThread,
-  serializeMeeting,
   serializePerson,
+  serializeTask,
 } from "../lib/serialize.js";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
@@ -50,6 +51,16 @@ function digestPerson(person: {
     lastName: person.lastName,
     email: person.email,
   });
+}
+
+function toScheduleItem(row: {
+  task: typeof tasks.$inferSelect;
+  person: typeof people.$inferSelect;
+}): HomeScheduleItem {
+  return {
+    task: serializeTask(row.task),
+    person: digestPerson(serializePerson(row.person)),
+  };
 }
 
 export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -69,8 +80,12 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
       const now = new Date();
       const todayYmd = zonedIsoDate(now);
       const today = todayBoundsUtc(now);
-      const yesterday = yesterdayBoundsUtc(now);
-      const visibility = emailThreadsVisibleSql(user.email) ?? sql`true`;
+      const owner = await loadPersonalMailboxOwner(app.db);
+      const visibility = emailThreadsVisibleSql(user, owner) ?? sql`true`;
+      const listed = and(
+        isNull(people.deletedAt),
+        eq(people.doNotContact, false),
+      );
 
       const [
         leftoverRows,
@@ -81,35 +96,36 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         incubatorRows,
         upcomingMeetingRows,
         openTaskRows,
+        needsTrackRows,
+        needsReviewRows,
       ] = await Promise.all([
         app.db
-          .select({ meeting: meetings, person: people })
-          .from(meetings)
-          .innerJoin(people, eq(meetings.personId, people.id))
+          .select({ task: tasks, person: people })
+          .from(tasks)
+          .innerJoin(people, eq(tasks.personId, people.id))
           .where(
             and(
-              eq(meetings.outcome, "scheduled"),
-              gte(meetings.scheduledAt, yesterday.start),
-              lt(meetings.scheduledAt, yesterday.end),
-              isNull(people.deletedAt),
-              eq(people.doNotContact, false),
+              eq(tasks.kind, "meeting"),
+              eq(tasks.status, "open"),
+              listed,
+              or(lt(tasks.dueAt, today.start), eq(tasks.needsReview, true)),
             ),
           )
-          .orderBy(asc(meetings.scheduledAt)),
+          .orderBy(asc(tasks.dueAt)),
         app.db
-          .select({ meeting: meetings, person: people })
-          .from(meetings)
-          .innerJoin(people, eq(meetings.personId, people.id))
+          .select({ task: tasks, person: people })
+          .from(tasks)
+          .innerJoin(people, eq(tasks.personId, people.id))
           .where(
             and(
-              eq(meetings.outcome, "scheduled"),
-              gte(meetings.scheduledAt, today.start),
-              lt(meetings.scheduledAt, today.end),
-              isNull(people.deletedAt),
-              eq(people.doNotContact, false),
+              eq(tasks.kind, "meeting"),
+              eq(tasks.status, "open"),
+              gte(tasks.dueAt, today.start),
+              lt(tasks.dueAt, today.end),
+              listed,
             ),
           )
-          .orderBy(asc(meetings.scheduledAt)),
+          .orderBy(asc(tasks.dueAt)),
         app.db
           .select()
           .from(emailThreads)
@@ -131,10 +147,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
               lt(emailThreads.lastMessageAt, today.end),
               or(
                 isNull(emailThreads.personId),
-                and(
-                  isNull(people.deletedAt),
-                  eq(people.doNotContact, false),
-                ),
+                and(isNull(people.deletedAt), eq(people.doNotContact, false)),
               ),
             ),
           )
@@ -145,8 +158,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           .innerJoin(people, eq(allocationCards.personId, people.id))
           .where(
             and(
-              isNull(people.deletedAt),
-              eq(people.doNotContact, false),
+              listed,
               inArray(allocationCards.stage, [
                 "contacted",
                 "in_conversation",
@@ -158,49 +170,58 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           .select({ card: incubatorCards, person: people })
           .from(incubatorCards)
           .innerJoin(people, eq(incubatorCards.personId, people.id))
-          .where(
-            and(
-              isNull(people.deletedAt),
-              eq(people.doNotContact, false),
-              inArray(incubatorCards.stage, [
-                "applied",
-              ]),
-            ),
-          ),
+          .where(and(listed, inArray(incubatorCards.stage, ["applied"]))),
         app.db
           .select()
-          .from(meetings)
+          .from(tasks)
           .where(
             and(
-              gte(meetings.scheduledAt, now),
-              inArray(meetings.outcome, ["scheduled", "rescheduled"]),
+              eq(tasks.kind, "meeting"),
+              eq(tasks.status, "open"),
+              gte(tasks.dueAt, now),
             ),
           )
-          .orderBy(asc(meetings.scheduledAt)),
+          .orderBy(asc(tasks.dueAt)),
         app.db
           .select({ task: tasks, person: people })
           .from(tasks)
           .innerJoin(people, eq(tasks.personId, people.id))
           .where(
-            and(
-              eq(tasks.status, "open"),
-              lt(tasks.dueAt, today.end),
-              isNull(people.deletedAt),
-              eq(people.doNotContact, false),
-            ),
+            and(eq(tasks.status, "open"), lt(tasks.dueAt, today.end), listed),
           )
           .orderBy(asc(tasks.dueAt)),
+        app.db
+          .select({ person: people, incubatorStage: incubatorCards.stage })
+          .from(people)
+          .leftJoin(incubatorCards, eq(incubatorCards.personId, people.id))
+          .where(
+            and(listed, isNull(people.programTrack), or(
+              isNull(incubatorCards.stage),
+              ne(incubatorCards.stage, "rejected"),
+            )),
+          )
+          .orderBy(asc(people.lastName), asc(people.firstName)),
+        app.db
+          .select()
+          .from(people)
+          .where(and(listed, eq(people.needsReview, true)))
+          .orderBy(asc(people.lastName), asc(people.firstName)),
       ]);
 
-      const leftoverMeetings: MeetingDigestItem[] = leftoverRows.map((row) => ({
-        meeting: meetingSchema.parse(serializeMeeting(row.meeting)),
-        person: digestPerson(serializePerson(row.person)),
-      }));
+      const leftoverMeetings: HomeScheduleItem[] = leftoverRows
+        .filter(
+          (row) =>
+            row.task.dueAt.getTime() < today.start.getTime() ||
+            row.task.needsReview,
+        )
+        .filter(
+          (row) =>
+            row.task.dueAt.getTime() < today.start.getTime() ||
+            !todayMeetingRows.some((todayRow) => todayRow.task.id === row.task.id),
+        )
+        .map(toScheduleItem);
 
-      const todayMeetings: MeetingDigestItem[] = todayMeetingRows.map((row) => ({
-        meeting: meetingSchema.parse(serializeMeeting(row.meeting)),
-        person: digestPerson(serializePerson(row.person)),
-      }));
+      const todayMeetings: HomeScheduleItem[] = todayMeetingRows.map(toScheduleItem);
 
       const skipCallPersonIds = new Set<string>();
       for (const meeting of upcomingMeetingRows) {
@@ -213,18 +234,29 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         skipCallPersonIds.add(item.person.id);
       }
 
-      const openTasks: HomeOpenTaskInput[] = openTaskRows.map((row) => {
+      const closeTaskIds = new Set([
+        ...leftoverMeetings.map((item) => item.task.id),
+        ...todayMeetings
+          .filter((item) => item.task.dueAt <= now.toISOString())
+          .map((item) => item.task.id),
+      ]);
+
+      const openTasks: HomeOpenTaskInput[] = [];
+      for (const row of openTaskRows) {
         if (row.task.kind === "call" || row.task.kind === "meeting") {
           skipCallPersonIds.add(row.person.id);
         }
-        return {
+        if (row.task.kind === "meeting" || closeTaskIds.has(row.task.id)) {
+          continue;
+        }
+        openTasks.push({
           id: row.task.id,
           person: digestPerson(serializePerson(row.person)),
           kind: row.task.kind,
           dueAt: row.task.dueAt.toISOString(),
           notes: row.task.notes,
-        };
-      });
+        });
+      }
 
       const callsDue: HomeCallInput[] = [];
       const decisions: HomeDecisionInput[] = [];
@@ -234,7 +266,10 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           decisions.push({ person });
           continue;
         }
-        if (row.card.stage !== "contacted" && row.card.stage !== "in_conversation") {
+        if (
+          row.card.stage !== "contacted" &&
+          row.card.stage !== "in_conversation"
+        ) {
           continue;
         }
         if (row.card.stage === "contacted" && row.card.noCallAppLink) {
@@ -273,6 +308,16 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         };
       });
 
+      const needsTrack = needsTrackRows.map((row) =>
+        digestPerson(serializePerson(row.person)),
+      );
+      const needsReview: HomePersonInput[] = needsReviewRows.map((row) => ({
+        person: digestPerson(serializePerson(row)),
+        firstName: row.firstName,
+        lastName: row.lastName,
+        needsReview: row.needsReview,
+      }));
+
       const todos = buildHomeTodos({
         leftoverMeetings,
         todayMeetings,
@@ -281,17 +326,13 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         callsDue,
         decisions,
         incubatorWaiting,
+        needsTrack,
+        needsReview,
         now,
       });
 
       const emails = todayEmailRows
-        .filter((row) =>
-          canViewEmailThread({
-            mailbox: row.thread.mailbox,
-            sharedVisible: row.thread.sharedVisible,
-            viewerEmail: user.email,
-          }),
-        )
+        .filter((row) => emailThreadRowVisible(row.thread, user, owner))
         .map((row) => ({
           thread: emailThreadSchema.parse(serializeEmailThread(row.thread)),
           person: row.person

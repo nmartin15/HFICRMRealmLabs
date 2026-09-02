@@ -9,6 +9,7 @@ import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { asc, eq } from "drizzle-orm";
 import { users } from "@realm-labs/db";
 import { serializeUser } from "../lib/serialize.js";
+import { writeActivity } from "../lib/activity.js";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
 
@@ -64,7 +65,18 @@ export const userRoutes: FastifyPluginAsyncZod = async (app) => {
         throw httpError(404, "NOT_FOUND", "User not found");
       }
 
-      // TODO: activities.person_id is required, so role changes cannot write an activity row.
+      await writeActivity(app.db, {
+        personId: null,
+        userId: actor.id,
+        type: "field_change",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "user.role",
+          when: new Date().toISOString(),
+          before: { role: row.role, userId: row.id },
+          after: { role, userId: updated.id },
+        },
+      });
 
       return userSchema.parse(serializeUser(updated));
     },

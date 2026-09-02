@@ -1,5 +1,6 @@
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import {
   serializerCompiler,
   validatorCompiler,
@@ -62,6 +63,10 @@ export async function buildApp(env: Env) {
   await app.register(cors, {
     origin: env.WEB_ORIGIN,
     credentials: true,
+  });
+
+  await app.register(multipart, {
+    limits: { fileSize: 10 * 1024 * 1024 },
   });
 
   await app.register(cookie, {

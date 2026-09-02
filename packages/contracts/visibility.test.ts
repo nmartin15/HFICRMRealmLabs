@@ -74,6 +74,30 @@ describe("email thread visibility", () => {
       }),
     ).toBe(true);
   });
+
+  it("treats the connected mailbox user as owner", () => {
+    const connectorId = "11111111-1111-4111-8111-111111111111";
+    expect(
+      canViewEmailThread({
+        mailbox: "personal",
+        sharedVisible: false,
+        viewerEmail: teammate,
+        viewerId: connectorId,
+        personalMailboxEmail: "personal@realmlabs.co",
+        personalMailboxConnectedBy: connectorId,
+      }),
+    ).toBe(true);
+    expect(
+      canViewEmailThread({
+        mailbox: "personal",
+        sharedVisible: false,
+        viewerEmail: teammate,
+        viewerId: "22222222-2222-4222-8222-222222222222",
+        personalMailboxEmail: "personal@realmlabs.co",
+        personalMailboxConnectedBy: connectorId,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("admin-only mutations", () => {

@@ -17,3 +17,5 @@ credentials.json
 coverage
 *.tsbuildinfo
 tmp-applicant-sheet.csv
+data/resumes
+**/data/resumes

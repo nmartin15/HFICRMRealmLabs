@@ -6,7 +6,9 @@ export type EmailThreadVisibilityInput = {
   mailbox: Mailbox;
   sharedVisible: boolean;
   viewerEmail: string;
+  viewerId?: string;
   personalMailboxEmail?: string;
+  personalMailboxConnectedBy?: string;
 };
 
 /**
@@ -34,14 +36,22 @@ export function canViewActivity(): boolean {
  * Personal mailbox threads are visible only to the mailbox owner unless
  * shared_visible is true.
  *
- * Owner is the CRM user whose email matches the personal mailbox account
- * (nathan@realmlabs.co). TODO(Prompt 5): resolve owner via connected mailbox rows.
+ * Owner is the connected personal mailbox row: matching Google email, or
+ * the user who connected it. Falls back to the personal mailbox constant
+ * when no connection row is supplied.
  */
 export function canViewEmailThread(input: EmailThreadVisibilityInput): boolean {
   if (input.mailbox === "shared") {
     return true;
   }
   if (input.sharedVisible) {
+    return true;
+  }
+  if (
+    input.viewerId &&
+    input.personalMailboxConnectedBy &&
+    input.viewerId === input.personalMailboxConnectedBy
+  ) {
     return true;
   }
   const ownerEmail = normalizeEmail(

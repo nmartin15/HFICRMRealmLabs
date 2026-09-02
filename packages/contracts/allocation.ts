@@ -61,6 +61,34 @@ export const LEAD_TEMP_LABELS: Record<LeadTemp, string> = {
 
 export const ALLOCATION_BOARD_HREF = "/allocation" as const;
 export const INCUBATOR_BOARD_HREF = "/incubator" as const;
+export const RECRUITMENT_BOARD_HREF = "/recruitment" as const;
+export const CAPITAL_RAISING_BOARD_HREF = "/capital-raising" as const;
+
+export const PIPELINE_BOARD_TRACKS = [
+  "allocation",
+  "recruitment",
+  "capital_raising",
+] as const;
+export type PipelineBoardTrack = (typeof PIPELINE_BOARD_TRACKS)[number];
+
+export const PIPELINE_BOARD_HREFS: Record<
+  PipelineBoardTrack,
+  "/allocation" | "/recruitment" | "/capital-raising"
+> = {
+  allocation: ALLOCATION_BOARD_HREF,
+  recruitment: RECRUITMENT_BOARD_HREF,
+  capital_raising: CAPITAL_RAISING_BOARD_HREF,
+};
+
+export function isPipelineBoardTrack(
+  track: ProgramTrack | null | undefined,
+): track is PipelineBoardTrack {
+  return (
+    track === "allocation" ||
+    track === "recruitment" ||
+    track === "capital_raising"
+  );
+}
 
 const MS_PER_DAY = 86_400_000;
 
@@ -111,9 +139,9 @@ export function stageEnteredAtIso(input: {
 
 export type PersonBoardBadge =
   | {
-      board: "allocation";
+      board: PipelineBoardTrack;
       stage: AllocationStage;
-      href: typeof ALLOCATION_BOARD_HREF;
+      href: (typeof PIPELINE_BOARD_HREFS)[PipelineBoardTrack];
     }
   | {
       board: "incubator";
@@ -137,11 +165,14 @@ export function currentBoardBadge(input: {
       href: INCUBATOR_BOARD_HREF,
     };
   }
-  if (input.programTrack === "allocation" && input.allocationStage) {
+  if (
+    isPipelineBoardTrack(input.programTrack) &&
+    input.allocationStage
+  ) {
     return {
-      board: "allocation",
+      board: input.programTrack,
       stage: input.allocationStage,
-      href: ALLOCATION_BOARD_HREF,
+      href: PIPELINE_BOARD_HREFS[input.programTrack],
     };
   }
   return null;

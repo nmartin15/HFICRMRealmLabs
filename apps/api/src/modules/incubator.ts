@@ -18,7 +18,6 @@ import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import {
   activities,
-  allocationCards,
   incubatorCards,
   people,
   type Database,
@@ -71,7 +70,6 @@ async function toBoardCards(
   rows: Array<{
     card: typeof incubatorCards.$inferSelect;
     person: typeof people.$inferSelect;
-    noCallAppLink: boolean | null;
   }>,
 ): Promise<IncubatorBoardCard[]> {
   if (rows.length === 0) {
@@ -95,6 +93,9 @@ async function toBoardCards(
     { occurredAt: string; afterStage: unknown }
   >();
   for (const change of stageChangeRows) {
+    if (!change.personId) {
+      continue;
+    }
     const payload = change.payload;
     if (
       !payload ||
@@ -132,7 +133,6 @@ async function toBoardCards(
         budgetQualified: person.budgetQualified,
         programTrack: person.programTrack,
       },
-      noCallAppLink: row.noCallAppLink ?? false,
       daysInStage: daysInStage(enteredAt, now),
     });
   });
@@ -156,11 +156,9 @@ export const incubatorRoutes: FastifyPluginAsyncZod = async (app) => {
         .select({
           card: incubatorCards,
           person: people,
-          noCallAppLink: allocationCards.noCallAppLink,
         })
         .from(incubatorCards)
         .innerJoin(people, eq(incubatorCards.personId, people.id))
-        .leftJoin(allocationCards, eq(allocationCards.personId, people.id))
         .where(listedPeople)
         .orderBy(asc(incubatorCards.routedAt));
 
@@ -229,17 +227,9 @@ export const incubatorRoutes: FastifyPluginAsyncZod = async (app) => {
         throw httpError(404, "NOT_FOUND", "Person not found");
       }
 
-      const allocRows = await app.db
-        .select({ noCallAppLink: allocationCards.noCallAppLink })
-        .from(allocationCards)
-        .where(eq(allocationCards.personId, card.personId))
-        .limit(1);
-
       const result = evaluateIncubatorMove({
         from: card.stage,
         to: req.body.stage,
-        budgetQualified: person.budgetQualified,
-        noCallAppLink: allocRows[0]?.noCallAppLink ?? false,
         applicationRef: card.applicationRef,
         tier: card.tier,
         priceUsd: card.priceUsd,

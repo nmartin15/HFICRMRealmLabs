@@ -12,15 +12,17 @@ import {
   uuidSchema,
 } from "./enums";
 import type { IncubatorStage } from "./enums";
-import { TASK_KIND_LABELS } from "./tasks";
+import { TASK_KIND_LABELS, taskSchema } from "./tasks";
 import {
-  meetingDigestItemSchema,
   meetingDigestPersonSchema,
-  type MeetingDigestItem,
+  type MeetingDigestPerson,
 } from "./meetings";
+import { UNKNOWN_PERSON_NAME } from "./webhooks";
 
 export const HOME_TODO_KINDS = [
   "close_meeting",
+  "needs_track",
+  "needs_review",
   "task",
   "email",
   "call",
@@ -33,11 +35,13 @@ export type HomeTodoKind = z.infer<typeof homeTodoKindSchema>;
 
 const KIND_ORDER: Record<HomeTodoKind, number> = {
   close_meeting: 0,
-  task: 1,
-  email: 2,
-  call: 3,
-  decision: 4,
-  incubator: 5,
+  needs_track: 1,
+  needs_review: 2,
+  task: 3,
+  email: 4,
+  call: 5,
+  decision: 6,
+  incubator: 7,
 };
 
 export const homeTodoSchema = z.object({
@@ -47,7 +51,8 @@ export const homeTodoSchema = z.object({
   title: z.string().min(1),
   detail: z.string(),
   at: isoDateTimeSchema.nullable(),
-  meetingId: uuidSchema.nullable(),
+  taskId: uuidSchema.nullable(),
+  personId: uuidSchema.nullable(),
 });
 export type HomeTodo = z.infer<typeof homeTodoSchema>;
 
@@ -83,10 +88,24 @@ export const homeOpenTaskInputSchema = z.object({
 });
 export type HomeOpenTaskInput = z.infer<typeof homeOpenTaskInputSchema>;
 
+export const homePersonInputSchema = z.object({
+  person: meetingDigestPersonSchema,
+  firstName: z.string(),
+  lastName: z.string(),
+  needsReview: z.boolean(),
+});
+export type HomePersonInput = z.infer<typeof homePersonInputSchema>;
+
+export const homeScheduleItemSchema = z.object({
+  task: taskSchema,
+  person: meetingDigestPersonSchema,
+});
+export type HomeScheduleItem = z.infer<typeof homeScheduleItemSchema>;
+
 export const homeSnapshotResponseSchema = z.object({
   date: isoDateSchema,
   todos: z.array(homeTodoSchema),
-  schedule: z.array(meetingDigestItemSchema),
+  schedule: z.array(homeScheduleItemSchema),
   emails: z.array(homeEmailItemSchema),
   counts: z.object({
     todo: z.number().int().nonnegative(),
@@ -97,12 +116,19 @@ export const homeSnapshotResponseSchema = z.object({
 });
 export type HomeSnapshotResponse = z.infer<typeof homeSnapshotResponseSchema>;
 
-export function meetingNeedsOutcome(
-  scheduledAt: string,
-  outcome: string,
+export function meetingTaskNeedsOutcome(
+  dueAt: string,
+  status: string,
   now: Date,
+  needsReview = false,
 ): boolean {
-  return outcome === "scheduled" && new Date(scheduledAt).getTime() <= now.getTime();
+  if (status !== "open") {
+    return false;
+  }
+  if (needsReview) {
+    return true;
+  }
+  return new Date(dueAt).getTime() <= now.getTime();
 }
 
 export function isIncubatorWaitingStage(
@@ -111,15 +137,27 @@ export function isIncubatorWaitingStage(
   return stage === "applied";
 }
 
-function todo(
-  partial: HomeTodo,
-): HomeTodo {
+function todo(partial: HomeTodo): HomeTodo {
   return homeTodoSchema.parse(partial);
 }
 
+export function reviewTodoDetail(input: {
+  firstName: string;
+  lastName: string;
+  needsReview: boolean;
+}): string {
+  const missingName =
+    input.firstName === UNKNOWN_PERSON_NAME ||
+    input.lastName === UNKNOWN_PERSON_NAME;
+  if (missingName) {
+    return "Name missing";
+  }
+  return "Application webhook: unexpected stage";
+}
+
 export function buildHomeTodos(input: {
-  leftoverMeetings: MeetingDigestItem[];
-  todayMeetings: MeetingDigestItem[];
+  leftoverMeetings: HomeScheduleItem[];
+  todayMeetings: HomeScheduleItem[];
   openTasks: HomeOpenTaskInput[];
   unmatchedEmails: Array<{
     id: string;
@@ -130,6 +168,8 @@ export function buildHomeTodos(input: {
   callsDue: HomeCallInput[];
   decisions: HomeDecisionInput[];
   incubatorWaiting: HomeIncubatorInput[];
+  needsTrack: MeetingDigestPerson[];
+  needsReview: HomePersonInput[];
   now: Date;
 }): HomeTodo[] {
   const items: HomeTodo[] = [];
@@ -137,36 +177,69 @@ export function buildHomeTodos(input: {
   for (const item of input.leftoverMeetings) {
     items.push(
       todo({
-        id: `close-meeting:${item.meeting.id}`,
+        id: `close-meeting:${item.task.id}`,
         kind: "close_meeting",
         href: `/people/${item.person.id}`,
         title: personDisplayName(item.person),
         detail: "Close leftover call",
-        at: item.meeting.scheduledAt,
-        meetingId: item.meeting.id,
+        at: item.task.dueAt,
+        taskId: item.task.id,
+        personId: item.person.id,
       }),
     );
   }
 
   for (const item of input.todayMeetings) {
     if (
-      !meetingNeedsOutcome(
-        item.meeting.scheduledAt,
-        item.meeting.outcome,
+      !meetingTaskNeedsOutcome(
+        item.task.dueAt,
+        item.task.status,
         input.now,
+        item.task.needsReview,
       )
     ) {
       continue;
     }
     items.push(
       todo({
-        id: `close-meeting:${item.meeting.id}`,
+        id: `close-meeting:${item.task.id}`,
         kind: "close_meeting",
         href: `/people/${item.person.id}`,
         title: personDisplayName(item.person),
         detail: "Close today's call",
-        at: item.meeting.scheduledAt,
-        meetingId: item.meeting.id,
+        at: item.task.dueAt,
+        taskId: item.task.id,
+        personId: item.person.id,
+      }),
+    );
+  }
+
+  for (const person of input.needsTrack) {
+    items.push(
+      todo({
+        id: `needs-track:${person.id}`,
+        kind: "needs_track",
+        href: `/people/${person.id}`,
+        title: personDisplayName(person),
+        detail: "Set program track",
+        at: null,
+        taskId: null,
+        personId: person.id,
+      }),
+    );
+  }
+
+  for (const item of input.needsReview) {
+    items.push(
+      todo({
+        id: `needs-review:${item.person.id}`,
+        kind: "needs_review",
+        href: `/people/${item.person.id}`,
+        title: personDisplayName(item.person),
+        detail: reviewTodoDetail(item),
+        at: null,
+        taskId: null,
+        personId: item.person.id,
       }),
     );
   }
@@ -182,7 +255,8 @@ export function buildHomeTodos(input: {
           ? `${TASK_KIND_LABELS[item.kind]} · ${item.notes}`
           : TASK_KIND_LABELS[item.kind],
         at: item.dueAt,
-        meetingId: null,
+        taskId: item.id,
+        personId: item.person.id,
       }),
     );
   }
@@ -196,7 +270,8 @@ export function buildHomeTodos(input: {
         title: thread.subject || "(no subject)",
         detail: thread.snippet ?? "Unmatched email",
         at: thread.lastMessageAt,
-        meetingId: null,
+        taskId: null,
+        personId: null,
       }),
     );
   }
@@ -210,7 +285,8 @@ export function buildHomeTodos(input: {
         title: personDisplayName(item.person),
         detail: `Call · ${item.stageLabel}`,
         at: null,
-        meetingId: null,
+        taskId: null,
+        personId: item.person.id,
       }),
     );
   }
@@ -224,7 +300,8 @@ export function buildHomeTodos(input: {
         title: personDisplayName(item.person),
         detail: `Task · ${ALLOCATION_STAGE_LABELS.decision}`,
         at: null,
-        meetingId: null,
+        taskId: null,
+        personId: item.person.id,
       }),
     );
   }
@@ -238,7 +315,8 @@ export function buildHomeTodos(input: {
         title: personDisplayName(item.person),
         detail: `Task · ${INCUBATOR_STAGE_LABELS[item.stage]}`,
         at: null,
-        meetingId: null,
+        taskId: null,
+        personId: item.person.id,
       }),
     );
   }

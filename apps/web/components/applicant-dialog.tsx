@@ -7,12 +7,16 @@ import type {
   CreateIncubatorApplicantBody,
   PersonSource,
   ProgramTrack,
+  TaskKind,
 } from "@realm-labs/contracts";
 import {
+  PIPELINE_BOARD_HREFS,
   PROGRAM_TRACK_LABELS,
+  TASK_KIND_LABELS,
   todayIsoInDisplayZone,
 } from "@realm-labs/contracts";
 import { api } from "@/lib/api";
+import { fromDatetimeLocalValue, todayTaskDueLocal } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +28,14 @@ const TRACKS: ProgramTrack[] = [
   "recruitment",
   "capital_raising",
 ];
+const TASK_KINDS: TaskKind[] = ["email", "call", "meeting", "dnc"];
+
+function createPath(track: ProgramTrack): string {
+  if (track === "incubator") {
+    return "/incubator";
+  }
+  return PIPELINE_BOARD_HREFS[track];
+}
 
 export function ApplicantDialog({
   open,
@@ -32,7 +44,7 @@ export function ApplicantDialog({
   onCreated,
 }: {
   open: boolean;
-  pipeline: "allocation" | "incubator";
+  pipeline: ProgramTrack;
   onClose: () => void;
   onCreated: (created: CreateApplicantResponse) => Promise<void>;
 }) {
@@ -49,6 +61,9 @@ export function ApplicantDialog({
     todayIsoInDisplayZone(new Date()),
   );
   const [applicationRef, setApplicationRef] = useState("");
+  const [firstTaskKind, setFirstTaskKind] = useState<TaskKind>("email");
+  const [firstTaskDue, setFirstTaskDue] = useState(todayTaskDueLocal);
+  const [firstTaskNotes, setFirstTaskNotes] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -67,6 +82,9 @@ export function ApplicantDialog({
       setProgramTrack(pipeline);
       setAppliedAt(todayIsoInDisplayZone(new Date()));
       setApplicationRef("");
+      setFirstTaskKind("email");
+      setFirstTaskDue(todayTaskDueLocal());
+      setFirstTaskNotes("");
       setError("");
       node.showModal();
       queueMicrotask(() => nameRef.current?.focus());
@@ -84,6 +102,11 @@ export function ApplicantDialog({
       email: email.trim(),
       source,
       programTrack,
+      firstTask: {
+        kind: firstTaskKind,
+        dueAt: fromDatetimeLocalValue(firstTaskDue),
+        ...(firstTaskNotes.trim() ? { notes: firstTaskNotes.trim() } : {}),
+      },
     };
     if (title.trim()) {
       shared.title = title.trim();
@@ -110,7 +133,7 @@ export function ApplicantDialog({
 
     try {
       const created = await api<CreateApplicantResponse>(
-        programTrack === "incubator" ? "/incubator" : "/allocation",
+        createPath(programTrack),
         { method: "POST", body: JSON.stringify(body) },
       );
       await onCreated(created);
@@ -137,7 +160,7 @@ export function ApplicantDialog({
       >
         <h2 className="text-sm font-medium">New contact</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Program track puts the card on a board.
+          Program track puts the card on a board. First follow-up is required.
         </p>
 
         <div className="mt-3 grid gap-3">
@@ -240,6 +263,47 @@ export function ApplicantDialog({
               />
             </div>
           ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="applicant-task-kind">First follow-up</Label>
+              <select
+                id="applicant-task-kind"
+                required
+                className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
+                value={firstTaskKind}
+                onChange={(event) =>
+                  setFirstTaskKind(event.target.value as TaskKind)
+                }
+              >
+                {TASK_KINDS.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {TASK_KIND_LABELS[kind]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="applicant-task-due">Due</Label>
+              <Input
+                id="applicant-task-due"
+                type="datetime-local"
+                required
+                value={firstTaskDue}
+                onChange={(event) => setFirstTaskDue(event.target.value)}
+              />
+            </div>
+            {firstTaskKind === "dnc" ? (
+              <div className="space-y-1 sm:col-span-2">
+                <Label htmlFor="applicant-task-notes">DNC reason</Label>
+                <Input
+                  id="applicant-task-notes"
+                  required
+                  value={firstTaskNotes}
+                  onChange={(event) => setFirstTaskNotes(event.target.value)}
+                />
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {error ? (

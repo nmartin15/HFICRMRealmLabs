@@ -1,4 +1,6 @@
 import {
+  PIPELINE_BOARD_HREFS,
+  PIPELINE_BOARD_TRACKS,
   allocationBoardCardSchema,
   allocationBoardResponseSchema,
   allocationCardIdParamsSchema,
@@ -17,6 +19,7 @@ import {
   stageEnteredAtIso,
   type AllocationBoardCard,
   type AllocationOpenStage,
+  type PipelineBoardTrack,
 } from "@realm-labs/contracts";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
@@ -118,6 +121,9 @@ async function toBoardCards(
     { occurredAt: string; afterStage: unknown }
   >();
   for (const change of stageChangeRows) {
+    if (!change.personId) {
+      continue;
+    }
     const occurredAt = change.occurredAt.toISOString();
     const existing = lastStageChangeByPerson.get(change.personId);
     if (!existing || occurredAt > existing.occurredAt) {
@@ -154,70 +160,81 @@ async function toBoardCards(
   });
 }
 
-const listedPeople = and(
-  isNull(people.deletedAt),
-  eq(people.doNotContact, false),
-  eq(people.programTrack, "allocation"),
-);
+function listedPeople(track: PipelineBoardTrack) {
+  return and(
+    isNull(people.deletedAt),
+    eq(people.doNotContact, false),
+    eq(people.programTrack, track),
+  );
+}
+
+async function loadPipelineBoard(
+  db: Database,
+  track: PipelineBoardTrack,
+) {
+  const rows = await db
+    .select({
+      card: allocationCards,
+      person: people,
+    })
+    .from(allocationCards)
+    .innerJoin(people, eq(allocationCards.personId, people.id))
+    .where(listedPeople(track))
+    .orderBy(asc(allocationCards.createdAt));
+
+  const items = await toBoardCards(db, rows);
+  const columns = emptyColumns();
+  const closed: AllocationBoardCard[] = [];
+
+  for (const item of items) {
+    if (!isOnAllocationBoard(item.card.decision)) {
+      continue;
+    }
+    if (isAllocationOpenStage(item.card.stage)) {
+      columns[item.card.stage].push(item);
+    } else {
+      closed.push(item);
+    }
+  }
+
+  return allocationBoardResponseSchema.parse({ columns, closed });
+}
 
 export const allocationRoutes: FastifyPluginAsyncZod = async (app) => {
-  app.get(
-    "/allocation",
-    {
-      schema: {
-        response: { 200: allocationBoardResponseSchema },
+  for (const track of PIPELINE_BOARD_TRACKS) {
+    const path = PIPELINE_BOARD_HREFS[track];
+    app.get(
+      path,
+      {
+        schema: {
+          response: { 200: allocationBoardResponseSchema },
+        },
       },
-    },
-    async (req) => {
-      requireUser(req);
-      if (!canViewCard()) {
-        throw httpError(403, "FORBIDDEN", "Forbidden");
-      }
-
-      const rows = await app.db
-        .select({
-          card: allocationCards,
-          person: people,
-        })
-        .from(allocationCards)
-        .innerJoin(people, eq(allocationCards.personId, people.id))
-        .where(listedPeople)
-        .orderBy(asc(allocationCards.createdAt));
-
-      const items = await toBoardCards(app.db, rows);
-      const columns = emptyColumns();
-      const closed: AllocationBoardCard[] = [];
-
-      for (const item of items) {
-        if (!isOnAllocationBoard(item.card.decision)) {
-          continue;
+      async (req) => {
+        requireUser(req);
+        if (!canViewCard()) {
+          throw httpError(403, "FORBIDDEN", "Forbidden");
         }
-        if (isAllocationOpenStage(item.card.stage)) {
-          columns[item.card.stage].push(item);
-        } else {
-          closed.push(item);
-        }
-      }
-
-      return allocationBoardResponseSchema.parse({ columns, closed });
-    },
-  );
-
-  app.post(
-    "/allocation",
-    {
-      schema: {
-        body: createAllocationApplicantBodySchema,
-        response: { 200: createApplicantResponseSchema },
+        return loadPipelineBoard(app.db, track);
       },
-    },
-    async (req) => {
-      const actor = requireUser(req);
-      return createApplicantResponseSchema.parse(
-        await createManualApplicant(app.db, actor, "allocation", req.body),
-      );
-    },
-  );
+    );
+
+    app.post(
+      path,
+      {
+        schema: {
+          body: createAllocationApplicantBodySchema,
+          response: { 200: createApplicantResponseSchema },
+        },
+      },
+      async (req) => {
+        const actor = requireUser(req);
+        return createApplicantResponseSchema.parse(
+          await createManualApplicant(app.db, actor, track, req.body),
+        );
+      },
+    );
+  }
 
   app.patch(
     "/allocation/:id/stage",

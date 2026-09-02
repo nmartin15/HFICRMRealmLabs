@@ -1,5 +1,4 @@
 import {
-  canViewEmailThread,
   emailThreadIdParamsSchema,
   emailThreadListResponseSchema,
   emailThreadSchema,
@@ -9,7 +8,11 @@ import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { emailThreads, people } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
-import { emailThreadsVisibleSql } from "../lib/email-visibility.js";
+import {
+  emailThreadRowVisible,
+  emailThreadsVisibleSql,
+  loadPersonalMailboxOwner,
+} from "../lib/email-visibility.js";
 import { serializeEmailThread } from "../lib/serialize.js";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
@@ -24,7 +27,8 @@ export const emailThreadRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (req) => {
       const user = requireUser(req);
-      const visibility = emailThreadsVisibleSql(user.email) ?? sql`true`;
+      const owner = await loadPersonalMailboxOwner(app.db);
+      const visibility = emailThreadsVisibleSql(user, owner) ?? sql`true`;
 
       const rows = await app.db
         .select({ thread: emailThreads, person: people })
@@ -40,13 +44,7 @@ export const emailThreadRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const visible = rows
         .map((row) => row.thread)
-        .filter((row) =>
-          canViewEmailThread({
-            mailbox: row.mailbox,
-            sharedVisible: row.sharedVisible,
-            viewerEmail: user.email,
-          }),
-        );
+        .filter((row) => emailThreadRowVisible(row, user, owner));
 
       return {
         data: visible.map((row) =>

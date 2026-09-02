@@ -37,6 +37,7 @@ describe("planCompleteTask", () => {
         currentKind: "call",
         currentStatus: "open",
         notes: "Left voicemail",
+        outcome: undefined,
         next: undefined,
         personDoNotContact: false,
         personDeleted: false,
@@ -50,6 +51,7 @@ describe("planCompleteTask", () => {
         currentKind: "dnc",
         currentStatus: "open",
         notes: "Asked not to be contacted",
+        outcome: undefined,
         next: undefined,
         personDoNotContact: false,
         personDeleted: false,
@@ -58,6 +60,8 @@ describe("planCompleteTask", () => {
       ok: true,
       notes: "Asked not to be contacted",
       setDoNotContact: true,
+      status: "done",
+      outcome: null,
       next: null,
     });
   });
@@ -68,6 +72,7 @@ describe("planCompleteTask", () => {
         currentKind: "call",
         currentStatus: "open",
         notes: "Booked",
+        outcome: undefined,
         next: {
           kind: "meeting",
           dueAt: "2026-09-02T18:00:00.000Z",
@@ -78,7 +83,68 @@ describe("planCompleteTask", () => {
       }),
     ).toMatchObject({
       ok: true,
+      status: "done",
       next: { kind: "meeting", notes: "Track record" },
+    });
+  });
+
+  it("requires a meeting outcome when closing a meeting task", () => {
+    expect(
+      planCompleteTask({
+        currentKind: "meeting",
+        currentStatus: "open",
+        notes: "Showed up",
+        outcome: undefined,
+        next: {
+          kind: "email",
+          dueAt: "2026-09-03T18:00:00.000Z",
+        },
+        personDoNotContact: false,
+        personDeleted: false,
+      }),
+    ).toMatchObject({ ok: false, code: "MEETING_OUTCOME_REQUIRED" });
+  });
+
+  it("records held and still requires a follow-up", () => {
+    expect(
+      planCompleteTask({
+        currentKind: "meeting",
+        currentStatus: "open",
+        notes: "Good call",
+        outcome: "held",
+        next: {
+          kind: "email",
+          dueAt: "2026-09-03T18:00:00.000Z",
+        },
+        personDoNotContact: false,
+        personDeleted: false,
+      }),
+    ).toMatchObject({
+      ok: true,
+      status: "done",
+      outcome: "held",
+      next: { kind: "email" },
+    });
+  });
+
+  it("marks a meeting rescheduled", () => {
+    expect(
+      planCompleteTask({
+        currentKind: "meeting",
+        currentStatus: "open",
+        notes: undefined,
+        outcome: "rescheduled",
+        next: {
+          kind: "meeting",
+          dueAt: "2026-09-10T18:00:00.000Z",
+        },
+        personDoNotContact: false,
+        personDeleted: false,
+      }),
+    ).toMatchObject({
+      ok: true,
+      status: "rescheduled",
+      outcome: "rescheduled",
     });
   });
 });

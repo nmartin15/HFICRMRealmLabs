@@ -8,12 +8,12 @@ import {
   type ReportPersonInput,
 } from "@realm-labs/contracts";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
-import { eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
   allocationCards,
-  meetings,
   people,
   reportInputs,
+  tasks,
 } from "@realm-labs/db";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
@@ -61,14 +61,16 @@ export const reportRoutes: FastifyPluginAsyncZod = async (app) => {
           .where(isNull(people.deletedAt)),
         app.db
           .select({
-            id: meetings.id,
-            personId: meetings.personId,
-            scheduledAt: meetings.scheduledAt,
-            outcome: meetings.outcome,
+            id: tasks.id,
+            personId: tasks.personId,
+            scheduledAt: tasks.dueAt,
+            outcome: tasks.outcome,
           })
-          .from(meetings)
-          .innerJoin(people, eq(people.id, meetings.personId))
-          .where(isNull(people.deletedAt)),
+          .from(tasks)
+          .innerJoin(people, eq(people.id, tasks.personId))
+          .where(
+            and(isNull(people.deletedAt), eq(tasks.kind, "meeting")),
+          ),
       ]);
 
       const reportPeople: ReportPersonInput[] = personRows.map((row) => ({
@@ -80,12 +82,19 @@ export const reportRoutes: FastifyPluginAsyncZod = async (app) => {
         noCallAppLink: row.noCallAppLink ?? false,
       }));
 
-      const reportMeetings: ReportMeetingInput[] = meetingRows.map((row) => ({
-        id: row.id,
-        personId: row.personId,
-        scheduledAt: row.scheduledAt.toISOString(),
-        outcome: row.outcome,
-      }));
+      const reportMeetings: ReportMeetingInput[] = meetingRows.flatMap((row) => {
+        if (!row.outcome) {
+          return [];
+        }
+        return [
+          {
+            id: row.id,
+            personId: row.personId,
+            scheduledAt: row.scheduledAt.toISOString(),
+            outcome: row.outcome,
+          },
+        ];
+      });
 
       return reportResponseSchema.parse(
         computeReport({

@@ -42,10 +42,7 @@ export type IncubatorCardIdParams = z.infer<
 export const incubatorStageMoveBodySchema = z.object({
   stage: incubatorStageSchema,
   applicationRef: z.string().optional(),
-  tier: incubatorTierSchema.optional(),
-  priceUsd: z.number().int().optional(),
   closeReason: z.string().optional(),
-  confirmPaid: z.boolean().optional(),
 });
 export type IncubatorStageMoveBody = z.infer<
   typeof incubatorStageMoveBodySchema
@@ -63,7 +60,6 @@ export type IncubatorBoardPerson = z.infer<typeof incubatorBoardPersonSchema>;
 export const incubatorBoardCardSchema = z.object({
   card: incubatorCardSchema,
   person: incubatorBoardPersonSchema,
-  noCallAppLink: z.boolean(),
   daysInStage: z.number().int().nonnegative(),
 });
 export type IncubatorBoardCard = z.infer<typeof incubatorBoardCardSchema>;

@@ -195,9 +195,6 @@ export default function IncubatorBoardPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-medium tracking-tight">Incubator</h1>
-          <p className="text-xs text-muted-foreground">
-            j/k cards · h/l columns · enter record · n note · c new
-          </p>
         </div>
         {board ? (
           <div className="flex items-center gap-3">
@@ -443,7 +440,7 @@ function IncubatorCardView({
         onClick={onFocus}
         onDoubleClick={onOpen}
         className={cn(
-          "rounded-lg border bg-card p-2 text-sm",
+          "cursor-grab rounded-lg border bg-card p-2 text-sm active:cursor-grabbing",
           focused && "ring-2 ring-ring ring-offset-2 ring-offset-background",
         )}
       >

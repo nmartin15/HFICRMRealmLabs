@@ -1,14 +1,42 @@
-import { canViewEmailThread, PERSONAL_MAILBOX_EMAIL, type Mailbox } from "@realm-labs/contracts";
+import {
+  PERSONAL_MAILBOX_EMAIL,
+  canViewEmailThread,
+  type Mailbox,
+} from "@realm-labs/contracts";
 import { eq, or, type SQL } from "drizzle-orm";
-import { emailThreads } from "@realm-labs/db";
+import { emailThreads, mailboxConnections, type Database } from "@realm-labs/db";
 
-export function emailThreadsVisibleSql(viewerEmail: string): SQL | undefined {
+export type PersonalMailboxOwner = {
+  email: string;
+  connectedBy: string;
+};
+
+export async function loadPersonalMailboxOwner(
+  db: Database,
+): Promise<PersonalMailboxOwner | null> {
+  const rows = await db
+    .select({
+      email: mailboxConnections.email,
+      connectedBy: mailboxConnections.connectedBy,
+    })
+    .from(mailboxConnections)
+    .where(eq(mailboxConnections.mailbox, "personal"))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export function emailThreadsVisibleSql(
+  viewer: { id: string; email: string },
+  owner: PersonalMailboxOwner | null,
+): SQL | undefined {
   if (
     canViewEmailThread({
       mailbox: "personal",
       sharedVisible: false,
-      viewerEmail,
-      personalMailboxEmail: PERSONAL_MAILBOX_EMAIL,
+      viewerEmail: viewer.email,
+      viewerId: viewer.id,
+      personalMailboxEmail: owner?.email ?? PERSONAL_MAILBOX_EMAIL,
+      personalMailboxConnectedBy: owner?.connectedBy,
     })
   ) {
     return undefined;
@@ -22,11 +50,15 @@ export function emailThreadsVisibleSql(viewerEmail: string): SQL | undefined {
 
 export function emailThreadRowVisible(
   row: { mailbox: Mailbox; sharedVisible: boolean },
-  viewerEmail: string,
+  viewer: { id: string; email: string },
+  owner: PersonalMailboxOwner | null,
 ): boolean {
   return canViewEmailThread({
     mailbox: row.mailbox,
     sharedVisible: row.sharedVisible,
-    viewerEmail,
+    viewerEmail: viewer.email,
+    viewerId: viewer.id,
+    personalMailboxEmail: owner?.email ?? PERSONAL_MAILBOX_EMAIL,
+    personalMailboxConnectedBy: owner?.connectedBy,
   });
 }

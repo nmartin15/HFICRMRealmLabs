@@ -1,12 +1,12 @@
 import {
   activitySchema,
   canDeletePerson,
-  canViewEmailThread,
   canViewPerson,
   completeTaskBodySchema,
   createPersonNoteBodySchema,
   createTaskBodySchema,
   currentBoardBadge,
+  isPipelineBoardTrack,
   mergePersonTimeline,
   okResponseSchema,
   personBoardBadgeSchema,
@@ -29,18 +29,27 @@ import {
   allocationCards,
   emailThreads,
   incubatorCards,
-  meetings,
   people,
   tasks,
   users,
   type Database,
 } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
-import { emailThreadsVisibleSql } from "../lib/email-visibility.js";
+import {
+  emailThreadRowVisible,
+  emailThreadsVisibleSql,
+  loadPersonalMailboxOwner,
+} from "../lib/email-visibility.js";
+import {
+  isAllowedResume,
+  isStoredResumeUrl,
+  readResumeFile,
+  saveResumeFile,
+  storedResumePath,
+} from "../lib/resume.js";
 import {
   serializeActivity,
   serializeEmailThread,
-  serializeMeeting,
   serializePerson,
   serializeTask,
 } from "../lib/serialize.js";
@@ -63,9 +72,11 @@ async function requirePerson(db: Database, id: string) {
 async function personTimeline(
   db: Database,
   personId: string,
-  viewerEmail: string,
+  viewer: { id: string; email: string },
 ) {
-  const [activityRows, meetingRows, threadRows] = await Promise.all([
+  const owner = await loadPersonalMailboxOwner(db);
+  const visibility = emailThreadsVisibleSql(viewer, owner) ?? sql`true`;
+  const [activityRows, threadRows] = await Promise.all([
     db
       .select()
       .from(activities)
@@ -73,34 +84,19 @@ async function personTimeline(
       .orderBy(desc(activities.occurredAt)),
     db
       .select()
-      .from(meetings)
-      .where(eq(meetings.personId, personId))
-      .orderBy(desc(meetings.scheduledAt)),
-    db
-      .select()
       .from(emailThreads)
-      .where(
-        and(
-          eq(emailThreads.personId, personId),
-          emailThreadsVisibleSql(viewerEmail) ?? sql`true`,
-        ),
-      )
+      .where(and(eq(emailThreads.personId, personId), visibility))
       .orderBy(desc(emailThreads.lastMessageAt)),
   ]);
 
   const visibleThreads = threadRows.filter((row) =>
-    canViewEmailThread({
-      mailbox: row.mailbox,
-      sharedVisible: row.sharedVisible,
-      viewerEmail,
-    }),
+    emailThreadRowVisible(row, viewer, owner),
   );
 
   return mergePersonTimeline({
     activities: activityRows.map((row) =>
       activitySchema.parse(serializeActivity(row)),
     ),
-    meetings: meetingRows.map((row) => serializeMeeting(row)),
     threads: visibleThreads.map((row) => serializeEmailThread(row)),
   });
 }
@@ -175,7 +171,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       const row = await requirePerson(app.db, req.params.id);
       const [board, timeline, taskRows] = await Promise.all([
         personBoard(app.db, row),
-        personTimeline(app.db, row.id, actor.email),
+        personTimeline(app.db, row.id, actor),
         app.db
           .select()
           .from(tasks)
@@ -220,15 +216,35 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       const before: Record<string, unknown> = {};
       const after: Record<string, unknown> = {};
       const update: {
+        firstName?: string;
+        lastName?: string;
         leadTemp?: typeof row.leadTemp;
         budgetQualified?: typeof row.budgetQualified;
         programTrack?: typeof row.programTrack;
         doNotContact?: boolean;
+        needsReview?: boolean;
         notes?: string | null;
         resumeFilename?: string | null;
         resumeContentType?: string | null;
         ownerId?: string | null;
       } = {};
+
+      if (
+        patch.firstName !== undefined &&
+        patch.firstName !== row.firstName
+      ) {
+        before.firstName = row.firstName;
+        after.firstName = patch.firstName;
+        update.firstName = patch.firstName;
+      }
+      if (
+        patch.lastName !== undefined &&
+        patch.lastName !== row.lastName
+      ) {
+        before.lastName = row.lastName;
+        after.lastName = patch.lastName;
+        update.lastName = patch.lastName;
+      }
 
       if (
         patch.programTrack !== undefined &&
@@ -275,6 +291,14 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           after.programTrack = null;
           update.programTrack = null;
         }
+      }
+      if (
+        patch.needsReview !== undefined &&
+        patch.needsReview !== row.needsReview
+      ) {
+        before.needsReview = row.needsReview;
+        after.needsReview = patch.needsReview;
+        update.needsReview = patch.needsReview;
       }
       if (patch.notes !== undefined && patch.notes !== row.notes) {
         before.notes = row.notes;
@@ -330,7 +354,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       });
 
-      if (updated.programTrack === "allocation") {
+      if (isPipelineBoardTrack(updated.programTrack)) {
         const existingAlloc = await app.db
           .select({ id: allocationCards.id })
           .from(allocationCards)
@@ -359,6 +383,104 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       return personSchema.parse(serializePerson(updated));
+    },
+  );
+
+  app.post(
+    "/people/:id/resume",
+    {
+      schema: {
+        params: personIdParamsSchema,
+        response: { 200: personSchema },
+      },
+    },
+    async (req) => {
+      const actor = requireUser(req);
+      const row = await requirePerson(app.db, req.params.id);
+      const file = await req.file();
+      if (!file) {
+        throw httpError(400, "FILE_REQUIRED", "Resume file is required");
+      }
+      const filename = file.filename || "resume.pdf";
+      const contentType = file.mimetype || "application/octet-stream";
+      if (!isAllowedResume({ filename, contentType })) {
+        throw httpError(400, "INVALID_RESUME", "Attach a PDF or Word document");
+      }
+      const bytes = await file.toBuffer();
+      await saveResumeFile({
+        storageDir: req.server.env.RESUME_STORAGE_DIR,
+        personId: row.id,
+        filename,
+        contentType,
+        bytes,
+      });
+      const resumeUrl = storedResumePath(row.id);
+      const [updated] = await app.db
+        .update(people)
+        .set({
+          resumeFilename: filename,
+          resumeContentType: contentType,
+          resumeUrl,
+        })
+        .where(eq(people.id, row.id))
+        .returning();
+      if (!updated) {
+        throw httpError(404, "NOT_FOUND", "Person not found");
+      }
+      const when = new Date();
+      await writeActivity(app.db, {
+        personId: row.id,
+        userId: actor.id,
+        type: "field_change",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "person.resume",
+          when: when.toISOString(),
+          before: {
+            resumeFilename: row.resumeFilename,
+            resumeUrl: row.resumeUrl,
+          },
+          after: {
+            resumeFilename: filename,
+            resumeUrl,
+          },
+        },
+      });
+      return personSchema.parse(serializePerson(updated));
+    },
+  );
+
+  app.get(
+    "/people/:id/resume",
+    {
+      schema: {
+        params: personIdParamsSchema,
+      },
+    },
+    async (req, reply) => {
+      requireUser(req);
+      const row = await requirePerson(app.db, req.params.id);
+      if (!isStoredResumeUrl(row.resumeUrl)) {
+        throw httpError(404, "NOT_FOUND", "No uploaded resume");
+      }
+      const stored = await readResumeFile({
+        storageDir: req.server.env.RESUME_STORAGE_DIR,
+        personId: row.id,
+      });
+      if (!stored) {
+        throw httpError(404, "NOT_FOUND", "No uploaded resume");
+      }
+      const downloadName = row.resumeFilename ?? stored.filename;
+      return reply
+        .header(
+          "Content-Type",
+          row.resumeContentType ?? "application/octet-stream",
+        )
+        .header(
+          "Content-Disposition",
+          `inline; filename="${downloadName.replaceAll('"', "")}"`,
+        )
+        .send(stored.bytes);
     },
   );
 
@@ -422,6 +544,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           dueAt: new Date(req.body.dueAt),
           notes: plan.notes,
           status: plan.kind === "dnc" ? "done" : "open",
+          outcome: plan.kind === "meeting" ? "scheduled" : null,
           createdBy: actor.id,
         })
         .returning();
@@ -481,6 +604,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         currentKind: current.kind,
         currentStatus: current.status,
         notes: req.body.notes ?? current.notes,
+        outcome: req.body.outcome,
         next: req.body.next,
         personDoNotContact: row.doNotContact,
         personDeleted: Boolean(row.deletedAt),
@@ -492,8 +616,10 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       const [updated] = await app.db
         .update(tasks)
         .set({
-          status: "done",
+          status: plan.status,
           notes: plan.notes,
+          outcome: plan.outcome,
+          needsReview: false,
         })
         .where(eq(tasks.id, current.id))
         .returning();
@@ -508,6 +634,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           dueAt: new Date(plan.next.dueAt),
           notes: plan.next.notes,
           status: plan.next.kind === "dnc" ? "done" : "open",
+          outcome: plan.next.kind === "meeting" ? "scheduled" : null,
           createdBy: actor.id,
         });
       }
@@ -528,7 +655,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           what: "task.complete",
           when: when.toISOString(),
           before: { status: current.status },
-          after: { status: "done", notes: plan.notes },
+          after: { status: plan.status, notes: plan.notes, outcome: plan.outcome },
         },
       });
       return taskSchema.parse(serializeTask(updated));

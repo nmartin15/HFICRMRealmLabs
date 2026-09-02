@@ -1,4 +1,8 @@
-import { DISPLAY_TIME_ZONE } from "@realm-labs/contracts";
+import {
+  DISPLAY_TIME_ZONE,
+  zonedLocalToUtc,
+  zonedYmd,
+} from "@realm-labs/contracts";
 
 export function formatDateTime(iso: string): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -81,5 +85,11 @@ export function defaultTaskDueLocal(): string {
   const due = new Date();
   due.setDate(due.getDate() + 1);
   due.setHours(9, 0, 0, 0);
+  return toDatetimeLocalValue(due.toISOString());
+}
+
+export function todayTaskDueLocal(): string {
+  const today = zonedYmd(new Date(), DISPLAY_TIME_ZONE);
+  const due = zonedLocalToUtc(today, DISPLAY_TIME_ZONE, 17, 0, 0);
   return toDatetimeLocalValue(due.toISOString());
 }

@@ -110,13 +110,19 @@ export function personNamesFromApplication(input: {
   firstName?: string;
   lastName?: string;
   email: string;
-}): { firstName: string; lastName: string } {
+}): { firstName: string; lastName: string; usedPlaceholder: boolean } {
   const firstName = input.firstName?.trim();
   const lastName = input.lastName?.trim();
-  // TODO: application form may omit names; placeholders keep people.first_name/last_name NOT NULL.
+  const resolvedFirst =
+    firstName && firstName.length > 0 ? firstName : UNKNOWN_PERSON_NAME;
+  const resolvedLast =
+    lastName && lastName.length > 0 ? lastName : UNKNOWN_PERSON_NAME;
   return {
-    firstName: firstName && firstName.length > 0 ? firstName : UNKNOWN_PERSON_NAME,
-    lastName: lastName && lastName.length > 0 ? lastName : UNKNOWN_PERSON_NAME,
+    firstName: resolvedFirst,
+    lastName: resolvedLast,
+    usedPlaceholder:
+      resolvedFirst === UNKNOWN_PERSON_NAME ||
+      resolvedLast === UNKNOWN_PERSON_NAME,
   };
 }
 
@@ -141,12 +147,12 @@ export type ApplicationWebhookDecision =
       cardId: string;
       needsReview: boolean;
     }
-  | {
+    | {
       action: "update";
       personId: string;
       cardId: string;
       fromStage: ApplicationWebhookEligibleStage;
-      needsReview: false;
+      needsReview: boolean;
     }
   | {
       action: "create";

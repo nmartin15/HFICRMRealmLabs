@@ -3,9 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { HomeSnapshotResponse, HomeTodoKind } from "@realm-labs/contracts";
+import type {
+  CompleteTaskBody,
+  HomeSnapshotResponse,
+  HomeTodoKind,
+} from "@realm-labs/contracts";
 import {
-  meetingNeedsOutcome,
+  meetingTaskNeedsOutcome,
   personDisplayName,
 } from "@realm-labs/contracts";
 import { api } from "@/lib/api";
@@ -14,11 +18,13 @@ import {
   isTypingTarget,
   useListNavigation,
 } from "@/hooks/use-list-navigation";
-import { MeetingOutcomeButtons } from "@/components/meeting-outcome-buttons";
+import { CompleteTaskForm } from "@/components/complete-task-form";
 import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Record<HomeTodoKind, string> = {
   close_meeting: "Call",
+  needs_track: "Track",
+  needs_review: "Review",
   task: "Task",
   email: "Email",
   call: "Call",
@@ -28,6 +34,8 @@ const KIND_LABEL: Record<HomeTodoKind, string> = {
 
 const KIND_CLASS: Record<HomeTodoKind, string> = {
   close_meeting: "text-canary",
+  needs_track: "text-canary",
+  needs_review: "text-canary",
   task: "text-primary",
   email: "text-teal",
   call: "text-canary",
@@ -40,6 +48,7 @@ export default function HomePage() {
   const [snapshot, setSnapshot] = useState<HomeSnapshotResponse | null>(null);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [completingId, setCompletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await api<HomeSnapshotResponse>("/home");
@@ -72,6 +81,24 @@ export default function HomePage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [router, selected, todos]);
+
+  async function completeMeetingTask(
+    personId: string,
+    taskId: string,
+    body: CompleteTaskBody,
+  ) {
+    setError("");
+    try {
+      await api(`/people/${personId}/tasks/${taskId}/complete`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      setCompletingId(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to complete task");
+    }
+  }
 
   const counts = snapshot?.counts;
   const now = new Date();
@@ -112,37 +139,64 @@ export default function HomePage() {
                 key={item.id}
                 data-nav-index={index}
                 className={cn(
-                  "flex flex-wrap items-center justify-between gap-3 px-3 py-2",
+                  "space-y-2 px-3 py-2",
                   index === selected && "bg-primary/10",
                 )}
               >
-                <div className="min-w-0">
-                  <p className="flex flex-wrap items-baseline gap-x-2">
-                    <span
-                      className={cn(
-                        "font-mono text-[11px] uppercase tracking-wide",
-                        KIND_CLASS[item.kind],
-                      )}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-baseline gap-x-2">
+                      <span
+                        className={cn(
+                          "font-mono text-[11px] uppercase tracking-wide",
+                          KIND_CLASS[item.kind],
+                        )}
+                      >
+                        {KIND_LABEL[item.kind]}
+                      </span>
+                      <Link
+                        href={item.href}
+                        className="text-sm font-medium hover:underline"
+                      >
+                        {item.title}
+                      </Link>
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {item.at
+                        ? `${formatDateTime(item.at)} · ${item.detail}`
+                        : item.detail}
+                    </p>
+                  </div>
+                  {item.kind === "close_meeting" &&
+                  item.taskId &&
+                  item.personId ? (
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() =>
+                        setCompletingId((current) =>
+                          current === item.id ? null : item.id,
+                        )
+                      }
                     >
-                      {KIND_LABEL[item.kind]}
-                    </span>
-                    <Link
-                      href={item.href}
-                      className="text-sm font-medium hover:underline"
-                    >
-                      {item.title}
-                    </Link>
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {item.at
-                      ? `${formatDateTime(item.at)} · ${item.detail}`
-                      : item.detail}
-                  </p>
+                      Close
+                    </button>
+                  ) : null}
                 </div>
-                {item.kind === "close_meeting" && item.meetingId ? (
-                  <MeetingOutcomeButtons
-                    meetingId={item.meetingId}
-                    onUpdated={() => void load()}
+                {completingId === item.id &&
+                item.taskId &&
+                item.personId ? (
+                  <CompleteTaskForm
+                    task={{ id: item.taskId, kind: "meeting", notes: null }}
+                    onCancel={() => setCompletingId(null)}
+                    onSubmit={(body) => {
+                      const personId = item.personId;
+                      const taskId = item.taskId;
+                      if (!personId || !taskId) {
+                        return;
+                      }
+                      void completeMeetingTask(personId, taskId, body);
+                    }}
                   />
                 ) : null}
               </li>
@@ -165,14 +219,15 @@ export default function HomePage() {
         ) : (
           <ul className="divide-y rounded-lg border">
             {snapshot.schedule.map((item) => {
-              const due = meetingNeedsOutcome(
-                item.meeting.scheduledAt,
-                item.meeting.outcome,
+              const due = meetingTaskNeedsOutcome(
+                item.task.dueAt,
+                item.task.status,
                 now,
+                item.task.needsReview,
               );
               return (
                 <li
-                  key={item.meeting.id}
+                  key={item.task.id}
                   className="flex flex-wrap items-center justify-between gap-3 px-3 py-2"
                 >
                   <div>
@@ -188,9 +243,9 @@ export default function HomePage() {
                       </Link>
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {formatTime(item.meeting.scheduledAt)}
+                      {formatTime(item.task.dueAt)}
                       {due ? " · needs outcome" : ""}
-                      {item.meeting.needsReview ? " · needs review" : ""}
+                      {item.task.needsReview ? " · needs review" : ""}
                     </p>
                   </div>
                 </li>

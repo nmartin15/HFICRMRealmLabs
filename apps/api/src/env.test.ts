@@ -26,4 +26,8 @@ describe("loadEnv stripe flag", () => {
         .ALLOWED_HOSTED_DOMAIN,
     ).toBe("realmlabs.co");
   });
+
+  it("defaults RESUME_STORAGE_DIR to data/resumes", () => {
+    expect(loadEnv(base).RESUME_STORAGE_DIR).toBe("data/resumes");
+  });
 });

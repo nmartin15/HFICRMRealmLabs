@@ -176,8 +176,20 @@ async function handleApplicationPayload(
     if (!current) {
       throw httpError(500, "INTERNAL", "Incubator card not found");
     }
+    const names = personNamesFromApplication({
+      firstName: body.first_name,
+      lastName: body.last_name,
+      email: body.email,
+    });
+    const needsReview = names.usedPlaceholder;
     const updated = await db.transaction(async (tx) => {
       const typedTx = tx as unknown as Database;
+      if (needsReview) {
+        await typedTx
+          .update(people)
+          .set({ needsReview: true })
+          .where(eq(people.id, current.personId));
+      }
       const [row] = await typedTx
         .update(incubatorCards)
         .set({
@@ -226,13 +238,15 @@ async function handleApplicationPayload(
       idempotent: false,
       personId: current.personId,
       incubatorCardId: updated.id,
-      needsReview: false,
+      needsReview,
     });
   }
 
   if (decision.action === "flag") {
-    // TODO: spec only covers Routed/Application Sent or no person; ineligible
-    // existing people are flagged without a stage change.
+    await db
+      .update(people)
+      .set({ needsReview: true })
+      .where(eq(people.id, decision.personId));
     await writeWebhookActivity(db, {
       personId: decision.personId,
       what: "webhook.application",
@@ -273,6 +287,7 @@ async function handleApplicationPayload(
           email: body.email,
           source: "other",
           notes: APPLICATION_WEBHOOK_REVIEW_NOTE,
+          needsReview: names.usedPlaceholder,
         })
         .returning();
       if (!createdPerson) {
@@ -303,7 +318,7 @@ async function handleApplicationPayload(
           applicationRef: body.application_ref,
           applicationResult: answersJson,
           source: "other",
-          needsReview: true,
+          needsReview: names.usedPlaceholder,
         },
       });
 
@@ -315,7 +330,7 @@ async function handleApplicationPayload(
       idempotent: false,
       personId: created.person.id,
       incubatorCardId: created.card.id,
-      needsReview: true,
+      needsReview: names.usedPlaceholder,
     });
   } catch (err) {
     if (!isUniqueViolation(err) || retried) {

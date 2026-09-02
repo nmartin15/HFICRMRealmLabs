@@ -48,6 +48,9 @@ function serializeResumeUrl(value: string | null): string | null {
   if (!value) {
     return null;
   }
+  if (value.startsWith("/")) {
+    return value;
+  }
   try {
     return new URL(value).toString();
   } catch {
@@ -74,6 +77,7 @@ export function serializePerson(row: PersonRow): Person {
     leadTemp: row.leadTemp,
     budgetQualified: row.budgetQualified,
     doNotContact: row.doNotContact,
+    needsReview: row.needsReview,
     ownerId: row.ownerId,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
@@ -123,6 +127,9 @@ export function serializeTask(row: TaskRow): Task {
     dueAt: toIso(row.dueAt),
     notes: row.notes,
     status: row.status,
+    calendarEventId: row.calendarEventId,
+    outcome: row.outcome,
+    needsReview: row.needsReview,
     createdBy: row.createdBy,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),

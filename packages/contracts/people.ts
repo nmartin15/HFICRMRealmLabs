@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { activitySchema } from "./activities";
 import {
-  ALLOCATION_BOARD_HREF,
+  CAPITAL_RAISING_BOARD_HREF,
   INCUBATOR_BOARD_HREF,
+  RECRUITMENT_BOARD_HREF,
+  ALLOCATION_BOARD_HREF,
 } from "./allocation";
 import {
   allocationStageSchema,
@@ -28,7 +30,7 @@ export const personSchema = z.object({
   company: z.string().nullable(),
   location: z.string().nullable(),
   source: personSourceSchema,
-  resumeUrl: z.url().nullable(),
+  resumeUrl: z.string().nullable(),
   resumeFilename: z.string().nullable(),
   resumeContentType: z.string().nullable(),
   appliedAt: isoDateSchema.nullable(),
@@ -37,6 +39,7 @@ export const personSchema = z.object({
   leadTemp: leadTempSchema.nullable(),
   budgetQualified: budgetQualifiedSchema,
   doNotContact: z.boolean(),
+  needsReview: z.boolean(),
   ownerId: uuidSchema.nullable(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -54,6 +57,7 @@ export const personInsertSchema = personSchema
   .extend({
     budgetQualified: budgetQualifiedSchema.default("unknown"),
     doNotContact: z.boolean().default(false),
+    needsReview: z.boolean().default(false),
   });
 export type PersonInsert = z.infer<typeof personInsertSchema>;
 
@@ -76,6 +80,9 @@ export const personPatchSchema = z.object({
   resumeFilename: z.string().nullable().optional(),
   resumeContentType: z.string().nullable().optional(),
   ownerId: uuidSchema.nullable().optional(),
+  firstName: z.string().trim().min(1).optional(),
+  lastName: z.string().trim().min(1).optional(),
+  needsReview: z.boolean().optional(),
 });
 export type PersonPatch = z.infer<typeof personPatchSchema>;
 
@@ -89,6 +96,16 @@ export const personBoardBadgeSchema = z.discriminatedUnion("board", [
     board: z.literal("allocation"),
     stage: allocationStageSchema,
     href: z.literal(ALLOCATION_BOARD_HREF),
+  }),
+  z.object({
+    board: z.literal("recruitment"),
+    stage: allocationStageSchema,
+    href: z.literal(RECRUITMENT_BOARD_HREF),
+  }),
+  z.object({
+    board: z.literal("capital_raising"),
+    stage: allocationStageSchema,
+    href: z.literal(CAPITAL_RAISING_BOARD_HREF),
   }),
   z.object({
     board: z.literal("incubator"),

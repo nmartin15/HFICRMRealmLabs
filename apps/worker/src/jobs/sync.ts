@@ -16,8 +16,8 @@ import {
   decryptSecret,
   emailThreads,
   mailboxConnections,
-  meetings,
   people,
+  tasks,
   users,
   type Database,
 } from "@realm-labs/db";
@@ -505,43 +505,47 @@ async function upsertCalendarMeeting(
 
   const existingRows = await db
     .select()
-    .from(meetings)
+    .from(tasks)
     .where(
       and(
-        eq(meetings.personId, input.person.id),
-        eq(meetings.calendarEventId, calendarEventId),
+        eq(tasks.personId, input.person.id),
+        eq(tasks.calendarEventId, calendarEventId),
       ),
     )
     .limit(1);
   const existing = existingRows[0];
-  if (existing && existing.outcome !== "scheduled") {
+  if (existing && existing.status !== "open") {
     await db
-      .update(meetings)
-      .set({ scheduledAt: input.scheduledAt })
-      .where(eq(meetings.id, existing.id));
+      .update(tasks)
+      .set({ dueAt: input.scheduledAt })
+      .where(eq(tasks.id, existing.id));
     return;
   }
 
   if (input.cancelled) {
     const resolution = cancelledMeetingResolution(input.hasReplacement);
     const outcome = resolution === "rescheduled" ? "rescheduled" : "scheduled";
+    const status = resolution === "rescheduled" ? "rescheduled" : "open";
     const needsReview = resolution === "needs_review";
     if (existing) {
       await db
-        .update(meetings)
+        .update(tasks)
         .set({
-          scheduledAt: input.scheduledAt,
+          dueAt: input.scheduledAt,
           outcome,
+          status,
           needsReview,
         })
-        .where(eq(meetings.id, existing.id));
+        .where(eq(tasks.id, existing.id));
       return;
     }
-    await db.insert(meetings).values({
+    await db.insert(tasks).values({
       personId: input.person.id,
-      scheduledAt: input.scheduledAt,
+      kind: "meeting",
+      dueAt: input.scheduledAt,
       calendarEventId,
       outcome,
+      status,
       needsReview,
       createdBy: input.actor.id,
     });
@@ -550,20 +554,22 @@ async function upsertCalendarMeeting(
 
   if (existing) {
     await db
-      .update(meetings)
+      .update(tasks)
       .set({
-        scheduledAt: input.scheduledAt,
+        dueAt: input.scheduledAt,
         needsReview: false,
       })
-      .where(eq(meetings.id, existing.id));
+      .where(eq(tasks.id, existing.id));
     return;
   }
 
-  await db.insert(meetings).values({
+  await db.insert(tasks).values({
     personId: input.person.id,
-    scheduledAt: input.scheduledAt,
+    kind: "meeting",
+    dueAt: input.scheduledAt,
     calendarEventId,
     outcome: "scheduled",
+    status: "open",
     needsReview: false,
     createdBy: input.actor.id,
   });

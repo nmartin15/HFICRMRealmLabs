@@ -15,6 +15,7 @@ export const envSchema = z.object({
   ADMIN_EMAIL: emailSchema,
   ALLOWED_HOSTED_DOMAIN: z.string().min(1).default("realmlabs.co"),
   TOKEN_ENCRYPTION_KEY: z.string().min(64),
+  RESUME_STORAGE_DIR: z.string().default("data/resumes"),
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
   GOOGLE_REDIRECT_URI: z

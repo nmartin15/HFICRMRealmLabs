@@ -10,7 +10,7 @@ export type ActivityPayload = z.infer<typeof activityPayloadSchema>;
 
 export const activitySchema = z.object({
   id: uuidSchema,
-  personId: uuidSchema,
+  personId: uuidSchema.nullable(),
   userId: uuidSchema.nullable(),
   type: activityTypeSchema,
   payload: activityPayloadSchema,

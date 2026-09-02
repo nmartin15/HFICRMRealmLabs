@@ -8,15 +8,33 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+const PIPELINE_HREFS = [
+  "/allocation",
+  "/recruitment",
+  "/capital-raising",
+] as const;
+
 const nav = [
   { href: "/", label: "Home" },
   { href: "/inbox/unmatched", label: "Unmatched" },
-  { href: "/allocation", label: "Allocation" },
+  { href: "/allocation", label: "Pipeline" },
   { href: "/incubator", label: "Incubator" },
   { href: "/reports", label: "Reports" },
   { href: "/import", label: "Import" },
   { href: "/settings", label: "Settings" },
 ] as const;
+
+function isNavActive(href: (typeof nav)[number]["href"], pathname: string) {
+  if (href === "/") {
+    return pathname === "/";
+  }
+  if (href === "/allocation") {
+    return PIPELINE_HREFS.includes(
+      pathname as (typeof PIPELINE_HREFS)[number],
+    );
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 export function AppShell({
   user,
@@ -29,6 +47,8 @@ export function AppShell({
   const router = useRouter();
   const wide =
     pathname === "/allocation" ||
+    pathname === "/recruitment" ||
+    pathname === "/capital-raising" ||
     pathname === "/incubator" ||
     pathname === "/import";
 
@@ -49,9 +69,7 @@ export function AppShell({
         </Link>
         <nav className="flex items-center gap-1">
           {nav.map((item) => {
-            const active =
-              pathname === item.href ||
-              (item.href !== "/" && pathname.startsWith(item.href));
+            const active = isNavActive(item.href, pathname);
             return (
               <Link
                 key={item.href}

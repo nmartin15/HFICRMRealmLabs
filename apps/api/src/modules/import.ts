@@ -356,6 +356,7 @@ async function commitRow(
       dueAt: new Date(task.dueAt),
       notes: task.notes,
       status: task.status,
+      outcome: task.kind === "meeting" ? (task.status === "open" ? "scheduled" : "held") : null,
       createdBy: actor.id,
     });
     createdTasks.push(task.dueAt);

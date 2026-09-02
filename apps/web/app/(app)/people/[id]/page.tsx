@@ -32,7 +32,7 @@ import {
   fromDatetimeLocalValue,
 } from "@/lib/format";
 import { useListNavigation } from "@/hooks/use-list-navigation";
-import { MeetingOutcomeButtons } from "@/components/meeting-outcome-buttons";
+import { CompleteTaskForm } from "@/components/complete-task-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -59,10 +59,20 @@ const RESUME_TYPES = new Set([
 ]);
 
 function boardLabel(board: NonNullable<PersonDetailResponse["board"]>): string {
-  if (board.board === "allocation") {
-    return `Allocation · ${ALLOCATION_STAGE_LABELS[board.stage]}`;
+  if (board.board === "incubator") {
+    return `Incubator · ${INCUBATOR_STAGE_LABELS[board.stage]}`;
   }
-  return `Incubator · ${INCUBATOR_STAGE_LABELS[board.stage]}`;
+  return `${PROGRAM_TRACK_LABELS[board.board]} · ${ALLOCATION_STAGE_LABELS[board.stage]}`;
+}
+
+function resumeHref(url: string | null): string | null {
+  if (!url) {
+    return null;
+  }
+  if (url.startsWith("https://") || url.startsWith("http://")) {
+    return url;
+  }
+  return `/api${url}`;
 }
 
 function allowedResume(file: File): boolean {
@@ -159,11 +169,18 @@ export default function PersonRecordPage() {
       setError("Attach a PDF or Word document");
       return;
     }
-    // TODO: persist the file bytes in blob storage; metadata only for now.
-    await patch({
-      resumeFilename: file.name,
-      resumeContentType: file.type || "application/octet-stream",
-    });
+    setError("");
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      const person = await api<Person>(`/people/${id}/resume`, {
+        method: "POST",
+        body: data,
+      });
+      setDetail((current) => (current ? { ...current, person } : current));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to upload resume");
+    }
   }
 
   if (!detail && !error) {
@@ -204,7 +221,74 @@ export default function PersonRecordPage() {
             Do not contact
           </p>
         ) : null}
+        {person.needsReview ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+            <p>Needs review</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void patch({ needsReview: false })}
+            >
+              Mark reviewed
+            </Button>
+          </div>
+        ) : null}
         <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-xs text-muted-foreground">First name</dt>
+            <dd>
+              <Input
+                value={person.firstName}
+                onChange={(event) =>
+                  setDetail((current) =>
+                    current
+                      ? {
+                          ...current,
+                          person: {
+                            ...current.person,
+                            firstName: event.target.value,
+                          },
+                        }
+                      : current,
+                  )
+                }
+                onBlur={(event) => {
+                  const value = event.target.value.trim();
+                  if (value) {
+                    void patch({ firstName: value });
+                  }
+                }}
+              />
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">Last name</dt>
+            <dd>
+              <Input
+                value={person.lastName}
+                onChange={(event) =>
+                  setDetail((current) =>
+                    current
+                      ? {
+                          ...current,
+                          person: {
+                            ...current.person,
+                            lastName: event.target.value,
+                          },
+                        }
+                      : current,
+                  )
+                }
+                onBlur={(event) => {
+                  const value = event.target.value.trim();
+                  if (value) {
+                    void patch({ lastName: value });
+                  }
+                }}
+              />
+            </dd>
+          </div>
           <div>
             <dt className="text-xs text-muted-foreground">Email</dt>
             <dd>
@@ -226,9 +310,9 @@ export default function PersonRecordPage() {
               {person.resumeFilename ? (
                 <p>{person.resumeFilename}</p>
               ) : null}
-              {person.resumeUrl ? (
+              {resumeHref(person.resumeUrl) ? (
                 <a
-                  href={person.resumeUrl}
+                  href={resumeHref(person.resumeUrl) ?? undefined}
                   target="_blank"
                   rel="noreferrer"
                   className="underline-offset-2 hover:underline"
@@ -486,7 +570,6 @@ export default function PersonRecordPage() {
                 key={`${item.kind}-${item.occurredAt}-${index}`}
                 item={item}
                 active={index === selected}
-                onMeetingUpdated={() => void load()}
               />
             ))}
           </ol>
@@ -496,120 +579,12 @@ export default function PersonRecordPage() {
   );
 }
 
-function CompleteTaskForm({
-  task,
-  onCancel,
-  onSubmit,
-}: {
-  task: Task;
-  onCancel: () => void;
-  onSubmit: (body: CompleteTaskBody) => void;
-}) {
-  const isDnc = task.kind === "dnc";
-  const [notes, setNotes] = useState(task.notes ?? "");
-  const [nextKind, setNextKind] = useState<TaskKind>("email");
-  const [nextDue, setNextDue] = useState(defaultTaskDueLocal);
-  const [nextNotes, setNextNotes] = useState("");
-
-  return (
-    <form
-      className="grid gap-2 rounded-md border bg-muted/30 p-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const body: CompleteTaskBody = {};
-        if (notes.trim()) {
-          body.notes = notes.trim();
-        }
-        if (!isDnc) {
-          body.next = {
-            kind: nextKind,
-            dueAt: fromDatetimeLocalValue(nextDue),
-            ...(nextNotes.trim() ? { notes: nextNotes.trim() } : {}),
-          };
-        }
-        onSubmit(body);
-      }}
-    >
-      <div className="space-y-1">
-        <Label htmlFor={`complete-notes-${task.id}`}>Notes</Label>
-        <textarea
-          id={`complete-notes-${task.id}`}
-          rows={2}
-          required={isDnc}
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-          className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-        />
-      </div>
-      {isDnc ? (
-        <p className="text-xs text-muted-foreground">
-          DNC does not need a follow-up.
-        </p>
-      ) : (
-        <>
-          <p className="text-xs text-muted-foreground">Follow-up task</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label htmlFor={`next-kind-${task.id}`}>Type</Label>
-              <select
-                id={`next-kind-${task.id}`}
-                className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
-                value={nextKind}
-                onChange={(event) =>
-                  setNextKind(event.target.value as TaskKind)
-                }
-              >
-                {TASK_KINDS.map((kind) => (
-                  <option key={kind} value={kind}>
-                    {TASK_KIND_LABELS[kind]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor={`next-due-${task.id}`}>Due</Label>
-              <Input
-                id={`next-due-${task.id}`}
-                type="datetime-local"
-                required
-                value={nextDue}
-                onChange={(event) => setNextDue(event.target.value)}
-              />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor={`next-notes-${task.id}`}>Follow-up notes</Label>
-            <textarea
-              id={`next-notes-${task.id}`}
-              rows={2}
-              required={nextKind === "dnc"}
-              value={nextNotes}
-              onChange={(event) => setNextNotes(event.target.value)}
-              className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            />
-          </div>
-        </>
-      )}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="submit" size="sm">
-          Close task
-        </Button>
-      </div>
-    </form>
-  );
-}
-
 function TimelineRow({
   item,
   active,
-  onMeetingUpdated,
 }: {
   item: TimelineItem;
   active: boolean;
-  onMeetingUpdated: () => void;
 }) {
   return (
     <li className={cn("px-3 py-2 text-sm", active && "bg-primary/10")}>
@@ -624,21 +599,6 @@ function TimelineRow({
           <span className="mx-1">·</span>
           {activitySummary(item.activity)}
         </p>
-      ) : null}
-      {item.kind === "meeting" ? (
-        <div className="space-y-2">
-          <p>
-            Meeting · {item.meeting.outcome.replaceAll("_", " ")}
-            {item.meeting.needsReview ? " · needs review" : ""}
-            {item.meeting.notes ? ` · ${item.meeting.notes}` : ""}
-          </p>
-          {item.meeting.outcome === "scheduled" ? (
-            <MeetingOutcomeButtons
-              meetingId={item.meeting.id}
-              onUpdated={onMeetingUpdated}
-            />
-          ) : null}
-        </div>
       ) : null}
       {item.kind === "email" ? (
         <p>

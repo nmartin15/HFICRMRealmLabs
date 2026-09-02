@@ -134,6 +134,7 @@ export const people = pgTable(
       .notNull()
       .default("unknown"),
     doNotContact: boolean("do_not_contact").notNull().default(false),
+    needsReview: boolean("needs_review").notNull().default(false),
     ownerId: uuid("owner_id").references(() => users.id),
     ...timestamps,
     deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
@@ -178,20 +179,32 @@ export const incubatorCards = pgTable("incubator_cards", {
   ...timestamps,
 });
 
-export const tasks = pgTable("tasks", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  personId: uuid("person_id")
-    .notNull()
-    .references(() => people.id),
-  kind: taskKindEnum("kind").notNull(),
-  dueAt: timestamp("due_at", { withTimezone: true, mode: "date" }).notNull(),
-  notes: text("notes"),
-  status: taskStatusEnum("status").notNull().default("open"),
-  createdBy: uuid("created_by")
-    .notNull()
-    .references(() => users.id),
-  ...timestamps,
-});
+export const tasks = pgTable(
+  "tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    kind: taskKindEnum("kind").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true, mode: "date" }).notNull(),
+    notes: text("notes"),
+    status: taskStatusEnum("status").notNull().default("open"),
+    calendarEventId: text("calendar_event_id"),
+    outcome: meetingOutcomeEnum("outcome"),
+    needsReview: boolean("needs_review").notNull().default(false),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("tasks_person_calendar_event_id_unique").on(
+      table.personId,
+      table.calendarEventId,
+    ),
+  ],
+);
 
 export const meetings = pgTable(
   "meetings",
@@ -263,9 +276,7 @@ export const emailThreads = pgTable(
 
 export const activities = pgTable("activities", {
   id: uuid("id").primaryKey().defaultRandom(),
-  personId: uuid("person_id")
-    .notNull()
-    .references(() => people.id),
+  personId: uuid("person_id").references(() => people.id),
   userId: uuid("user_id").references(() => users.id),
   type: activityTypeEnum("type").notNull(),
   payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),

@@ -29,6 +29,13 @@
       "when": 1788278400000,
       "tag": "0003_program_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788332160000,
+      "tag": "0004_close_holes",
+      "breakpoints": true
     }
   ]
 }

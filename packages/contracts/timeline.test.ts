@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Activity } from "./activities";
 import type { EmailThread } from "./email-threads";
-import type { Meeting } from "./meetings";
 import { mergePersonTimeline } from "./timeline";
 
 const base = {
@@ -15,19 +14,6 @@ function activity(overrides: Partial<Activity> & Pick<Activity, "id" | "occurred
     userId: null,
     type: "note",
     payload: {},
-    ...base,
-    ...overrides,
-  };
-}
-
-function meeting(overrides: Partial<Meeting> & Pick<Meeting, "id" | "scheduledAt">): Meeting {
-  return {
-    personId: "11111111-1111-4111-8111-111111111111",
-    calendarEventId: null,
-    outcome: "scheduled",
-    needsReview: false,
-    notes: null,
-    createdBy: "22222222-2222-4222-8222-222222222222",
     ...base,
     ...overrides,
   };
@@ -50,18 +36,12 @@ function thread(
 }
 
 describe("mergePersonTimeline", () => {
-  it("merges activities, meetings, and threads newest first", () => {
+  it("merges activities and threads newest first", () => {
     const merged = mergePersonTimeline({
       activities: [
         activity({
           id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           occurredAt: "2026-08-10T12:00:00.000Z",
-        }),
-      ],
-      meetings: [
-        meeting({
-          id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-          scheduledAt: "2026-08-12T12:00:00.000Z",
         }),
       ],
       threads: [
@@ -72,13 +52,8 @@ describe("mergePersonTimeline", () => {
       ],
     });
 
-    expect(merged.map((item) => item.kind)).toEqual([
-      "meeting",
-      "email",
-      "activity",
-    ]);
+    expect(merged.map((item) => item.kind)).toEqual(["email", "activity"]);
     expect(merged.map((item) => item.occurredAt)).toEqual([
-      "2026-08-12T12:00:00.000Z",
       "2026-08-11T12:00:00.000Z",
       "2026-08-10T12:00:00.000Z",
     ]);

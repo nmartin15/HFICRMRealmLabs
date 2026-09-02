@@ -504,7 +504,7 @@ describe("allocation and incubator planning", () => {
     expect(rejected.passReason).toBe("Not a fit");
   });
 
-  it("creates an incubator card at application_sent and advances on ref or closed", () => {
+  it("creates an incubator card at sent and advances on ref or closed", () => {
     const sent = planImportIncubator(
       null,
       {

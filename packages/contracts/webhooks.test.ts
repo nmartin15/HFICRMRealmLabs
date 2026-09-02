@@ -156,10 +156,18 @@ describe("personNamesFromApplication", () => {
         lastName: "Lovelace",
         email: "ada@example.com",
       }),
-    ).toEqual({ firstName: "Ada", lastName: "Lovelace" });
+    ).toEqual({
+      firstName: "Ada",
+      lastName: "Lovelace",
+      usedPlaceholder: false,
+    });
     expect(
       personNamesFromApplication({ email: "ada@example.com" }),
-    ).toEqual({ firstName: "Unknown", lastName: "Unknown" });
+    ).toEqual({
+      firstName: "Unknown",
+      lastName: "Unknown",
+      usedPlaceholder: true,
+    });
   });
 });
 
@@ -198,7 +206,7 @@ describe("decideStripeCheckout", () => {
     ).toEqual({ action: "ignore" });
   });
 
-  it("matches customer_email to an offer_made card and sets price_usd from amount_total", () => {
+  it("matches customer_email to an applied card and sets price_usd from amount_total", () => {
     expect(stripeAmountToUsd(500000)).toBe(5000);
     expect(
       decideStripeCheckout({

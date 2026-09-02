@@ -1,4 +1,5 @@
 import {
+  planCreateTask,
   planManualApplicant,
   todayIsoInDisplayZone,
   type ApplicantPipeline,
@@ -11,6 +12,7 @@ import {
   allocationCards,
   incubatorCards,
   people,
+  tasks,
   type Database,
 } from "@realm-labs/db";
 import type { AuthedUser } from "../plugins/auth.js";
@@ -186,6 +188,50 @@ export async function createManualApplicant(
         .update(people)
         .set({ programTrack: body.programTrack })
         .where(eq(people.id, personId));
+    }
+
+    const personDoNotContact = Boolean(existingPerson?.doNotContact);
+    if (!personDoNotContact) {
+      const taskPlan = planCreateTask({
+        kind: body.firstTask.kind,
+        notes: body.firstTask.notes,
+        personDoNotContact: false,
+        personDeleted: false,
+      });
+      if (!taskPlan.ok) {
+        throw httpError(taskPlan.status, taskPlan.code, taskPlan.message);
+      }
+      await tx.insert(tasks).values({
+        personId,
+        kind: taskPlan.kind,
+        dueAt: new Date(body.firstTask.dueAt),
+        notes: taskPlan.notes,
+        status: taskPlan.kind === "dnc" ? "done" : "open",
+        outcome: taskPlan.kind === "meeting" ? "scheduled" : null,
+        createdBy: actor.id,
+      });
+      if (taskPlan.setDoNotContact) {
+        await tx
+          .update(people)
+          .set({ doNotContact: true, programTrack: null })
+          .where(eq(people.id, personId));
+      }
+      await writeActivity(typedTx, {
+        personId,
+        userId: actor.id,
+        type: "note",
+        payload: {
+          who,
+          what: "task.create",
+          when: when.toISOString(),
+          before: null,
+          after: {
+            kind: taskPlan.kind,
+            notes: taskPlan.notes,
+            dueAt: body.firstTask.dueAt,
+          },
+        },
+      });
     }
 
     return { personId, cardId, reusedPerson };

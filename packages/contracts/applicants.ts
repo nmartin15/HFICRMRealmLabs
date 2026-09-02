@@ -9,6 +9,7 @@ import {
   type ProgramTrack,
 } from "./enums";
 import { splitName } from "./import";
+import { createTaskBodySchema } from "./tasks";
 
 export const createApplicantPersonBodySchema = z.object({
   name: z.string().trim().min(1),
@@ -19,6 +20,7 @@ export const createApplicantPersonBodySchema = z.object({
   source: personSourceSchema.default("other"),
   programTrack: programTrackSchema,
   appliedAt: isoDateSchema.optional(),
+  firstTask: createTaskBodySchema,
 });
 export type CreateApplicantPersonBody = z.infer<
   typeof createApplicantPersonBodySchema
@@ -47,7 +49,7 @@ export type CreateApplicantResponse = z.infer<
   typeof createApplicantResponseSchema
 >;
 
-export type ApplicantPipeline = "allocation" | "incubator";
+export type ApplicantPipeline = ProgramTrack;
 
 export type PlanManualApplicantExisting = {
   id: string;
@@ -119,7 +121,11 @@ export function planManualApplicant(
     programTrack: input.programTrack,
   };
 
-  if (input.programTrack === "allocation") {
+  if (
+    input.programTrack === "allocation" ||
+    input.programTrack === "recruitment" ||
+    input.programTrack === "capital_raising"
+  ) {
     if (input.existing?.hasAllocationCard) {
       return fail(
         409,
@@ -164,3 +170,4 @@ export function planManualApplicant(
     applicationRef: null,
   };
 }
+

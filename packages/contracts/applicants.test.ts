@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { planManualApplicant } from "./applicants";
+import {
+  createApplicantPersonBodySchema,
+  planManualApplicant,
+} from "./applicants";
 
 const existing = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -76,7 +79,7 @@ describe("planManualApplicant incubator", () => {
 });
 
 describe("planManualApplicant other tracks", () => {
-  it("creates a person without a pipeline card", () => {
+  it("creates a Recruitment Applied card", () => {
     expect(
       planManualApplicant({
         programTrack: "recruitment",
@@ -85,9 +88,23 @@ describe("planManualApplicant other tracks", () => {
       }),
     ).toMatchObject({
       ok: true,
-      allocationStage: null,
+      allocationStage: "applied",
       incubatorStage: null,
       programTrack: "recruitment",
+    });
+  });
+
+  it("creates a Capital Raising Applied card", () => {
+    expect(
+      planManualApplicant({
+        programTrack: "capital_raising",
+        name: "Ada Lovelace",
+        existing: null,
+      }),
+    ).toMatchObject({
+      ok: true,
+      allocationStage: "applied",
+      programTrack: "capital_raising",
     });
   });
 });
@@ -101,6 +118,30 @@ describe("planManualApplicant shared rules", () => {
         existing: null,
       }),
     ).toMatchObject({ ok: false, code: "INVALID_NAME" });
+  });
+
+  it("requires firstTask on create body", () => {
+    expect(
+      createApplicantPersonBodySchema.safeParse({
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        programTrack: "allocation",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts a first follow-up task", () => {
+    expect(
+      createApplicantPersonBodySchema.safeParse({
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        programTrack: "allocation",
+        firstTask: {
+          kind: "email",
+          dueAt: "2026-09-02T00:00:00.000Z",
+        },
+      }).success,
+    ).toBe(true);
   });
 
   it("blocks do not contact", () => {

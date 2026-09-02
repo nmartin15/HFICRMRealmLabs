@@ -118,18 +118,30 @@ describe("current board badge", () => {
     });
   });
 
-  it("shows a closed allocation card when there is no incubator", () => {
+  it("uses recruitment and capital raising boards from the allocation card", () => {
     expect(
       currentBoardBadge({
-        programTrack: "allocation",
+        programTrack: "recruitment",
         doNotContact: false,
-        allocationStage: "passed",
+        allocationStage: "contacted",
         incubatorStage: null,
       }),
     ).toEqual({
-      board: "allocation",
-      stage: "passed",
-      href: "/allocation",
+      board: "recruitment",
+      stage: "contacted",
+      href: "/recruitment",
+    });
+    expect(
+      currentBoardBadge({
+        programTrack: "capital_raising",
+        doNotContact: false,
+        allocationStage: "applied",
+        incubatorStage: null,
+      }),
+    ).toEqual({
+      board: "capital_raising",
+      stage: "applied",
+      href: "/capital-raising",
     });
   });
 });

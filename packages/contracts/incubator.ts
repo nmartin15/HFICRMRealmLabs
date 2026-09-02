@@ -26,8 +26,6 @@ export function isBudgetQualified(value: BudgetQualified): boolean {
 export type IncubatorMoveInput = {
   from: IncubatorStage;
   to: IncubatorStage;
-  budgetQualified: BudgetQualified;
-  noCallAppLink: boolean;
   applicationRef: string | null;
   tier: IncubatorTierName | null;
   priceUsd: number | null;
