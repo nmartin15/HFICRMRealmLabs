@@ -1,19 +1,23 @@
 {
-  email {$CADDY_EMAIL}
+	email {$CADDY_EMAIL}
 }
 
-crm.realmlabs.co {
-  encode gzip
+www.realmlabscrm.com {
+	redir https://realmlabscrm.com{uri} permanent
+}
 
-  handle /api* {
-    reverse_proxy api:3001
-  }
+realmlabscrm.com {
+	encode gzip
 
-  handle /health {
-    reverse_proxy api:3001
-  }
+	handle /api* {
+		reverse_proxy api:3001
+	}
 
-  handle {
-    reverse_proxy web:3000
-  }
+	handle /health {
+		reverse_proxy api:3001
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
 }

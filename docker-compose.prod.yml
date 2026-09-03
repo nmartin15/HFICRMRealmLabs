@@ -1,4 +1,30 @@
 services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: realm_labs_crm
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d realm_labs_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -51,8 +77,18 @@ services:
     environment:
       NODE_ENV: production
       API_PORT: "3001"
-      WEB_ORIGIN: https://crm.realmlabs.co
+      WEB_ORIGIN: https://realmlabscrm.com
       ALLOWED_HOSTED_DOMAIN: realmlabs.co
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/realm_labs_crm
+      REDIS_URL: redis://redis:6379
+      RESUME_STORAGE_DIR: /data/resumes
+    volumes:
+      - resume_data:/data/resumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -76,6 +112,13 @@ services:
     environment:
       NODE_ENV: production
       WORKER_HEALTH_PORT: "3002"
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/realm_labs_crm
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -98,7 +141,14 @@ services:
     environment:
       TZ: America/Los_Angeles
       BACKUP_RETENTION_DAYS: "30"
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/realm_labs_crm
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
+  postgres_data:
+  redis_data:
+  resume_data:
   caddy_data:
   caddy_config:

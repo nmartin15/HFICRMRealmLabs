@@ -8,7 +8,7 @@ primary_region = "sjc"
 [env]
   NODE_ENV = "production"
   PORT = "8080"
-  WEB_ORIGIN = "https://crm.realmlabs.co"
+  WEB_ORIGIN = "https://realmlabscrm.com"
   ALLOWED_HOSTED_DOMAIN = "realmlabs.co"
 
 [http_service]
