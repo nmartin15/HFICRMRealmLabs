@@ -41,6 +41,11 @@ export const createTaskBodySchema = z.object({
 });
 export type CreateTaskBody = z.infer<typeof createTaskBodySchema>;
 
+export const updateTaskBodySchema = z.object({
+  notes: z.string().trim().nullable().optional(),
+});
+export type UpdateTaskBody = z.infer<typeof updateTaskBodySchema>;
+
 export const completeTaskBodySchema = z.object({
   notes: z.string().trim().optional(),
   outcome: handSetMeetingOutcomeSchema.optional(),
@@ -138,6 +143,26 @@ export function planCreateTask(
     notes,
     setDoNotContact: input.kind === "dnc",
   };
+}
+
+export type PlanUpdateTaskNotesSuccess = {
+  ok: true;
+  notes: string | null;
+};
+
+export function planUpdateTaskNotes(input: {
+  currentStatus: string;
+  currentKind: TaskKind;
+  notes: string | null | undefined;
+}): PlanUpdateTaskNotesSuccess | PlanTaskWriteError {
+  if (input.currentStatus !== "open") {
+    return fail(409, "TASK_NOT_OPEN", "Only open tasks can be edited");
+  }
+  const notes = notesOrNull(input.notes);
+  if (input.currentKind === "dnc" && !notes) {
+    return fail(400, "DNC_REASON_REQUIRED", "DNC requires a reason in notes");
+  }
+  return { ok: true, notes };
 }
 
 export function planCompleteTask(input: {

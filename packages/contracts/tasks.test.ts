@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { planCompleteTask, planCreateTask } from "./tasks";
+import {
+  planCompleteTask,
+  planCreateTask,
+  planUpdateTaskNotes,
+} from "./tasks";
 
 describe("planCreateTask", () => {
   it("requires notes for DNC", () => {
@@ -27,6 +31,28 @@ describe("planCreateTask", () => {
       notes: "Not a fit",
       setDoNotContact: true,
     });
+  });
+});
+
+describe("planUpdateTaskNotes", () => {
+  it("updates notes on an open task", () => {
+    expect(
+      planUpdateTaskNotes({
+        currentStatus: "open",
+        currentKind: "email",
+        notes: "Talk about runway",
+      }),
+    ).toEqual({ ok: true, notes: "Talk about runway" });
+  });
+
+  it("rejects edits on closed tasks", () => {
+    expect(
+      planUpdateTaskNotes({
+        currentStatus: "done",
+        currentKind: "email",
+        notes: "Too late",
+      }),
+    ).toMatchObject({ ok: false, code: "TASK_NOT_OPEN" });
   });
 });
 

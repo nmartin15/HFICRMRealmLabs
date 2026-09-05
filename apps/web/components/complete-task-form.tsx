@@ -146,7 +146,7 @@ export function CompleteTaskForm({
           Cancel
         </Button>
         <Button type="submit" size="sm">
-          Complete
+          Mark done
         </Button>
       </div>
     </form>

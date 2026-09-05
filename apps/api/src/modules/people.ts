@@ -18,7 +18,9 @@ import {
   personSchema,
   planCompleteTask,
   planCreateTask,
+  planUpdateTaskNotes,
   taskSchema,
+  updateTaskBodySchema,
   uuidSchema,
 } from "@realm-labs/contracts";
 import { z } from "zod";
@@ -576,6 +578,64 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       });
       return taskSchema.parse(serializeTask(created));
+    },
+  );
+
+  app.patch(
+    "/people/:id/tasks/:taskId",
+    {
+      schema: {
+        params: z.object({ id: uuidSchema, taskId: uuidSchema }),
+        body: updateTaskBodySchema,
+        response: { 200: taskSchema },
+      },
+    },
+    async (req) => {
+      const actor = requireUser(req);
+      const row = await requirePerson(app.db, req.params.id);
+      const [current] = await app.db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.id, req.params.taskId), eq(tasks.personId, row.id)))
+        .limit(1);
+      if (!current) {
+        throw httpError(404, "NOT_FOUND", "Task not found");
+      }
+      if (req.body.notes === undefined) {
+        return taskSchema.parse(serializeTask(current));
+      }
+
+      const plan = planUpdateTaskNotes({
+        currentStatus: current.status,
+        currentKind: current.kind,
+        notes: req.body.notes,
+      });
+      if (!plan.ok) {
+        throw httpError(plan.status, plan.code, plan.message);
+      }
+
+      const [updated] = await app.db
+        .update(tasks)
+        .set({ notes: plan.notes })
+        .where(eq(tasks.id, current.id))
+        .returning();
+      if (!updated) {
+        throw httpError(500, "INTERNAL", "Failed to update task");
+      }
+
+      await writeActivity(app.db, {
+        personId: row.id,
+        userId: actor.id,
+        type: "note",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "task.notes",
+          when: new Date().toISOString(),
+          before: { notes: current.notes },
+          after: { notes: updated.notes },
+        },
+      });
+      return taskSchema.parse(serializeTask(updated));
     },
   );
 

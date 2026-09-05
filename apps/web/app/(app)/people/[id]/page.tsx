@@ -91,7 +91,11 @@ export default function PersonRecordPage() {
   const [taskKind, setTaskKind] = useState<TaskKind>("email");
   const [taskDue, setTaskDue] = useState(defaultTaskDueLocal);
   const [taskNotes, setTaskNotes] = useState("");
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [completingId, setCompletingId] = useState<string | null>(null);
+  const [draftTaskNotes, setDraftTaskNotes] = useState("");
+  const [personNotes, setPersonNotes] = useState("");
+  const [saveHint, setSaveHint] = useState("");
 
   const load = useCallback(async () => {
     const [personRes, userRes] = await Promise.all([
@@ -99,6 +103,7 @@ export default function PersonRecordPage() {
       api<UserListResponse>("/users"),
     ]);
     setDetail(personRes);
+    setPersonNotes(personRes.person.notes ?? "");
     setUsers(userRes.data);
   }, [id]);
 
@@ -119,6 +124,11 @@ export default function PersonRecordPage() {
         body: JSON.stringify(body),
       });
       setDetail((current) => (current ? { ...current, person } : current));
+      if (body.notes !== undefined) {
+        setPersonNotes(person.notes ?? "");
+      }
+      setSaveHint("Saved");
+      window.setTimeout(() => setSaveHint(""), 1500);
       if (body.programTrack !== undefined) {
         await load();
       }
@@ -147,6 +157,32 @@ export default function PersonRecordPage() {
     }
   }
 
+  async function saveTaskNotes(taskId: string) {
+    setError("");
+    try {
+      const task = await api<Task>(`/people/${id}/tasks/${taskId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          notes: draftTaskNotes.trim() ? draftTaskNotes.trim() : null,
+        }),
+      });
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              tasks: current.tasks.map((row) =>
+                row.id === task.id ? task : row,
+              ),
+            }
+          : current,
+      );
+      setSaveHint("Task notes saved");
+      window.setTimeout(() => setSaveHint(""), 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save task notes");
+    }
+  }
+
   async function completeTask(taskId: string, body: CompleteTaskBody) {
     setError("");
     try {
@@ -155,10 +191,17 @@ export default function PersonRecordPage() {
         body: JSON.stringify(body),
       });
       setCompletingId(null);
+      setExpandedTaskId(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to complete task");
     }
+  }
+
+  function openTask(task: Task) {
+    setExpandedTaskId(task.id);
+    setDraftTaskNotes(task.notes ?? "");
+    setCompletingId(null);
   }
 
   async function onResumeFile(file: File | undefined) {
@@ -234,6 +277,10 @@ export default function PersonRecordPage() {
             </Button>
           </div>
         ) : null}
+        <p className="text-xs text-muted-foreground">
+          No Save button — fields save when you leave them
+          {saveHint ? ` · ${saveHint}` : ""}.
+        </p>
         <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
           <div>
             <dt className="text-xs text-muted-foreground">First name</dt>
@@ -440,10 +487,30 @@ export default function PersonRecordPage() {
             ))}
           </select>
         </div>
+        <div className="space-y-1 sm:col-span-2">
+          <Label htmlFor="person-notes">Notes</Label>
+          <textarea
+            id="person-notes"
+            rows={3}
+            value={personNotes}
+            onChange={(event) => setPersonNotes(event.target.value)}
+            onBlur={() => {
+              const next = personNotes.trim() ? personNotes.trim() : null;
+              if (next !== (person.notes ?? null)) {
+                void patch({ notes: next });
+              }
+            }}
+            className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+        </div>
       </section>
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Tasks</h2>
+        <p className="text-xs text-muted-foreground">
+          New email/call/meeting tasks stay Open. Click a task to edit notes.
+          Use Mark done only after you finish it. DNC is closed immediately.
+        </p>
         {openTasks.length === 0 ? (
           <p className="text-sm text-muted-foreground">No open tasks.</p>
         ) : (
@@ -451,27 +518,74 @@ export default function PersonRecordPage() {
             {openTasks.map((task) => (
               <li key={task.id} className="space-y-2 px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p>
-                    {TASK_KIND_LABELS[task.kind]} · {formatDateTime(task.dueAt)}
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() =>
+                      expandedTaskId === task.id
+                        ? setExpandedTaskId(null)
+                        : openTask(task)
+                    }
+                  >
+                    <p>
+                      <span className="mr-2 rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                        Open
+                      </span>
+                      {TASK_KIND_LABELS[task.kind]} ·{" "}
+                      {formatDateTime(task.dueAt)}
+                    </p>
                     {task.notes ? (
-                      <span className="block text-muted-foreground">
+                      <span className="mt-0.5 block text-muted-foreground">
                         {task.notes}
                       </span>
-                    ) : null}
-                  </p>
+                    ) : (
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        No notes yet — click to add context
+                      </span>
+                    )}
+                  </button>
                   <Button
                     type="button"
                     size="sm"
-                    variant="ghost"
-                    onClick={() =>
-                      setCompletingId((current) =>
-                        current === task.id ? null : task.id,
-                      )
-                    }
+                    variant="outline"
+                    onClick={() => {
+                      openTask(task);
+                      setCompletingId(task.id);
+                    }}
                   >
-                    Complete
+                    Mark done
                   </Button>
                 </div>
+                {expandedTaskId === task.id && completingId !== task.id ? (
+                  <div className="space-y-2 rounded-md border bg-muted/30 p-2">
+                    <Label htmlFor={`task-notes-${task.id}`}>Task notes</Label>
+                    <textarea
+                      id={`task-notes-${task.id}`}
+                      rows={3}
+                      value={draftTaskNotes}
+                      onChange={(event) => setDraftTaskNotes(event.target.value)}
+                      placeholder="Talking points, email draft context, call agenda…"
+                      className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void saveTaskNotes(task.id)}
+                      >
+                        Save notes
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setExpandedTaskId(null)}
+                      >
+                        Close
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
                 {completingId === task.id ? (
                   <CompleteTaskForm
                     task={task}
@@ -524,6 +638,11 @@ export default function PersonRecordPage() {
               required={taskKind === "dnc"}
               value={taskNotes}
               onChange={(event) => setTaskNotes(event.target.value)}
+              placeholder={
+                taskKind === "dnc"
+                  ? "DNC reason (required) — closes immediately"
+                  : "Optional context for this open task"
+              }
               className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             />
           </div>
