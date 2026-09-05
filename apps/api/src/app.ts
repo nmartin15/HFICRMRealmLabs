@@ -15,6 +15,7 @@ import { emailThreadRoutes } from "./modules/email-threads.js";
 import { homeRoutes } from "./modules/home.js";
 import { importRoutes } from "./modules/import.js";
 import { incubatorRoutes } from "./modules/incubator.js";
+import { leadRoutes } from "./modules/leads.js";
 import { mailboxRoutes } from "./modules/mailboxes.js";
 import { meetingRoutes } from "./modules/meetings.js";
 import { peopleRoutes } from "./modules/people.js";
@@ -61,7 +62,17 @@ export async function buildApp(env: Env) {
   );
 
   await app.register(cors, {
-    origin: env.WEB_ORIGIN,
+    origin: (origin, cb) => {
+      if (!origin || origin === env.WEB_ORIGIN) {
+        cb(null, true);
+        return;
+      }
+      if (env.WEBSITE_ORIGIN && origin === env.WEBSITE_ORIGIN) {
+        cb(null, true);
+        return;
+      }
+      cb(null, false);
+    },
     credentials: true,
   });
 
@@ -103,6 +114,7 @@ export async function buildApp(env: Env) {
   await app.register(reportRoutes, { prefix: "/api" });
   await app.register(mailboxRoutes, { prefix: "/api" });
   await app.register(webhookRoutes, { prefix: "/api" });
+  await app.register(leadRoutes, { prefix: "/api" });
 
   return app;
 }

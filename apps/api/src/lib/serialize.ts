@@ -74,6 +74,7 @@ export function serializePerson(row: PersonRow): Person {
     appliedAt: row.appliedAt,
     notes: row.notes,
     programTrack: row.programTrack,
+    programInterest: row.programInterest,
     leadTemp: row.leadTemp,
     budgetQualified: row.budgetQualified,
     doNotContact: row.doNotContact,

@@ -5,7 +5,8 @@ import { buildApp } from "./app";
 import { loadEnv } from "./env";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-config({ path: resolve(root, ".env"), override: true });
+// Do not override Docker/Compose-injected env vars in production.
+config({ path: resolve(root, ".env"), override: false });
 
 const env = loadEnv();
 const app = await buildApp(env);

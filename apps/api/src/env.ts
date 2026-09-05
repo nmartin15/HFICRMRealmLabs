@@ -25,6 +25,8 @@ export const envSchema = z.object({
     .string()
     .default("http://localhost:3000/api/mailboxes/google/callback"),
   APPLICATION_WEBHOOK_SECRET: z.string().default(""),
+  WEBSITE_INTAKE_SECRET: z.string().default(""),
+  WEBSITE_ORIGIN: z.string().default(""),
   STRIPE_WEBHOOK_SECRET: z.string().default(""),
   STRIPE_ENABLED: z
     .string()

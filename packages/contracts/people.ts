@@ -15,6 +15,7 @@ import {
   isoDateTimeSchema,
   leadTempSchema,
   personSourceSchema,
+  programInterestSchema,
   programTrackSchema,
   uuidSchema,
 } from "./enums";
@@ -36,6 +37,7 @@ export const personSchema = z.object({
   appliedAt: isoDateSchema.nullable(),
   notes: z.string().nullable(),
   programTrack: programTrackSchema.nullable(),
+  programInterest: programInterestSchema.nullable(),
   leadTemp: leadTempSchema.nullable(),
   budgetQualified: budgetQualifiedSchema,
   doNotContact: z.boolean(),

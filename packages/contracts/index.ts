@@ -22,6 +22,7 @@ export * from "./email-matching";
 export * from "./sync-stages";
 export * from "./reports";
 export * from "./webhooks";
+export * from "./leads";
 export * from "./import";
 export * from "./tasks";
 export * from "./applicants";

@@ -29,12 +29,19 @@ export const personSourceEnum = pgEnum("person_source", [
   "workable",
   "referral",
   "other",
+  "website",
 ]);
 export const programTrackEnum = pgEnum("program_track", [
   "allocation",
   "incubator",
   "recruitment",
   "capital_raising",
+]);
+export const programInterestEnum = pgEnum("program_interest", [
+  "hedge_fund_incubator",
+  "lp_raising_program",
+  "quant_analyst_placement",
+  "not_sure",
 ]);
 export const taskKindEnum = pgEnum("task_kind", [
   "email",
@@ -129,6 +136,7 @@ export const people = pgTable(
     appliedAt: date("applied_at", { mode: "string" }),
     notes: text("notes"),
     programTrack: programTrackEnum("program_track"),
+    programInterest: programInterestEnum("program_interest"),
     leadTemp: leadTempEnum("lead_temp"),
     budgetQualified: budgetQualifiedEnum("budget_qualified")
       .notNull()

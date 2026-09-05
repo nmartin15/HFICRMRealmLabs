@@ -8,6 +8,7 @@ export const personSourceSchema = z.enum([
   "workable",
   "referral",
   "other",
+  "website",
 ]);
 export type PersonSource = z.infer<typeof personSourceSchema>;
 
@@ -18,6 +19,14 @@ export const programTrackSchema = z.enum([
   "capital_raising",
 ]);
 export type ProgramTrack = z.infer<typeof programTrackSchema>;
+
+export const programInterestSchema = z.enum([
+  "hedge_fund_incubator",
+  "lp_raising_program",
+  "quant_analyst_placement",
+  "not_sure",
+]);
+export type ProgramInterest = z.infer<typeof programInterestSchema>;
 
 export const leadTempSchema = z.enum(["cold", "lukewarm", "warm", "hot"]);
 export type LeadTemp = z.infer<typeof leadTempSchema>;

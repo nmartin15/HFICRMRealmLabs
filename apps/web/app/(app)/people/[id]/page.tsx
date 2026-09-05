@@ -43,6 +43,7 @@ const SOURCE_LABEL: Record<Person["source"], string> = {
   workable: "Workable",
   referral: "Referral",
   other: "Other",
+  website: "Website",
 };
 
 const TASK_KINDS: TaskKind[] = ["email", "call", "meeting", "dnc"];
