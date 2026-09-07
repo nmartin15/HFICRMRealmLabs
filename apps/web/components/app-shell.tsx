@@ -16,6 +16,7 @@ const PIPELINE_HREFS = [
 
 const nav = [
   { href: "/", label: "Home" },
+  { href: "/people", label: "Contacts" },
   { href: "/inbox/unmatched", label: "Unmatched" },
   { href: "/allocation", label: "Pipeline" },
   { href: "/incubator", label: "Incubator" },

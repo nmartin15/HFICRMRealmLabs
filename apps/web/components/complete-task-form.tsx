@@ -98,7 +98,9 @@ export function CompleteTaskForm({
         </p>
       ) : (
         <>
-          <p className="text-xs text-muted-foreground">Follow-up task</p>
+          <p className="text-xs text-muted-foreground">
+            Follow-up task — saved as Open. It is not marked done.
+          </p>
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1">
               <Label htmlFor={`next-kind-${task.id}`}>Type</Label>
@@ -146,7 +148,7 @@ export function CompleteTaskForm({
           Cancel
         </Button>
         <Button type="submit" size="sm">
-          Mark done
+          {isDnc ? "Mark done" : "Mark done & save follow-up"}
         </Button>
       </div>
     </form>

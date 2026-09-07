@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  describeTaskActivity,
   planCompleteTask,
   planCreateTask,
   planUpdateTaskNotes,
@@ -172,5 +173,33 @@ describe("planCompleteTask", () => {
       status: "rescheduled",
       outcome: "rescheduled",
     });
+  });
+});
+
+describe("describeTaskActivity", () => {
+  it("names who completed what and that the follow-up was saved", () => {
+    expect(
+      describeTaskActivity({
+        what: "task.complete",
+        after: {
+          taskId: "11111111-1111-4111-8111-111111111111",
+          kind: "call",
+          status: "done",
+          next: { kind: "email", dueAt: "2026-09-10T16:00:00.000Z" },
+        },
+      }),
+    ).toBe("Completed Call (done) · saved follow-up Email");
+  });
+
+  it("labels a follow-up create separately from a first task", () => {
+    expect(
+      describeTaskActivity({
+        what: "task.create",
+        after: {
+          kind: "email",
+          followUpFromTaskId: "11111111-1111-4111-8111-111111111111",
+        },
+      }),
+    ).toBe("Saved follow-up Email");
   });
 });

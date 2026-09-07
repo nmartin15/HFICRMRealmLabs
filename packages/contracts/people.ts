@@ -9,6 +9,7 @@ import {
 import {
   allocationStageSchema,
   budgetQualifiedSchema,
+  emailInputSchema,
   emailSchema,
   incubatorStageSchema,
   isoDateSchema,
@@ -19,7 +20,8 @@ import {
   programTrackSchema,
   uuidSchema,
 } from "./enums";
-import { taskSchema } from "./tasks";
+import { splitName } from "./import";
+import { createTaskBodySchema, taskSchema } from "./tasks";
 import { timelineItemSchema } from "./timeline";
 
 export const personSchema = z.object({
@@ -92,6 +94,91 @@ export const createPersonNoteBodySchema = z.object({
   text: z.string().trim().min(1),
 });
 export type CreatePersonNoteBody = z.infer<typeof createPersonNoteBodySchema>;
+
+export const createPersonBodySchema = z.object({
+  name: z.string().trim().min(1),
+  email: emailInputSchema,
+  title: z.string().trim().min(1).optional(),
+  company: z.string().trim().min(1).optional(),
+  location: z.string().trim().min(1).optional(),
+  source: personSourceSchema.default("other"),
+  notes: z.string().trim().min(1).optional(),
+  firstTask: createTaskBodySchema.optional(),
+});
+export type CreatePersonBody = z.infer<typeof createPersonBodySchema>;
+
+export const createPersonResponseSchema = z.object({
+  personId: uuidSchema,
+  reusedPerson: z.boolean(),
+});
+export type CreatePersonResponse = z.infer<typeof createPersonResponseSchema>;
+
+export type PlanManualContactExisting = {
+  id: string;
+  doNotContact: boolean;
+  deleted: boolean;
+};
+
+export type PlanManualContactError = {
+  ok: false;
+  status: 400 | 409;
+  code: string;
+  message: string;
+};
+
+export type PlanManualContactSuccess = {
+  ok: true;
+  firstName: string;
+  lastName: string;
+  reusePersonId: string | null;
+  restoreDeleted: boolean;
+};
+
+export type PlanManualContactResult =
+  | PlanManualContactSuccess
+  | PlanManualContactError;
+
+function failContact(
+  status: 400 | 409,
+  code: string,
+  message: string,
+): PlanManualContactError {
+  return { ok: false, status, code, message };
+}
+
+export function planManualContact(input: {
+  name: string;
+  existing: PlanManualContactExisting | null;
+}): PlanManualContactResult {
+  const names = splitName(input.name);
+  if ("error" in names) {
+    return failContact(400, "INVALID_NAME", names.error);
+  }
+
+  if (input.existing?.doNotContact) {
+    return failContact(
+      409,
+      "DO_NOT_CONTACT",
+      "Person is marked do not contact",
+    );
+  }
+
+  if (input.existing && !input.existing.deleted) {
+    return failContact(
+      409,
+      "EMAIL_EXISTS",
+      "A contact with this email already exists",
+    );
+  }
+
+  return {
+    ok: true,
+    firstName: names.firstName,
+    lastName: names.lastName,
+    reusePersonId: input.existing?.id ?? null,
+    restoreDeleted: Boolean(input.existing?.deleted),
+  };
+}
 
 export const personBoardBadgeSchema = z.discriminatedUnion("board", [
   z.object({

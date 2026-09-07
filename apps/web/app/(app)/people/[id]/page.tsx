@@ -22,9 +22,10 @@ import {
   LEAD_TEMP_LABELS,
   PROGRAM_TRACK_LABELS,
   TASK_KIND_LABELS,
+  completedTaskIdFromPayload,
 } from "@realm-labs/contracts";
 import { api } from "@/lib/api";
-import { activitySummary } from "@/lib/activity-summary";
+import { activityActorLabel, activitySummary } from "@/lib/activity-summary";
 import {
   defaultTaskDueLocal,
   formatDate,
@@ -106,6 +107,7 @@ export default function PersonRecordPage() {
     setDetail(personRes);
     setPersonNotes(personRes.person.notes ?? "");
     setUsers(userRes.data);
+    return personRes;
   }, [id]);
 
   useEffect(() => {
@@ -192,8 +194,17 @@ export default function PersonRecordPage() {
         body: JSON.stringify(body),
       });
       setCompletingId(null);
-      setExpandedTaskId(null);
-      await load();
+      const nextDetail = await load();
+      if (body.next && body.next.kind !== "dnc") {
+        const followUp = [...nextDetail.tasks]
+          .filter((task) => task.status === "open")
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+        if (followUp) {
+          openTask(followUp);
+        }
+      } else {
+        setExpandedTaskId(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to complete task");
     }
@@ -509,8 +520,9 @@ export default function PersonRecordPage() {
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Tasks</h2>
         <p className="text-xs text-muted-foreground">
-          New email/call/meeting tasks stay Open. Click a task to edit notes.
-          Use Mark done only after you finish it. DNC is closed immediately.
+          New email/call/meeting tasks stay Open. Save notes anytime.
+          Use Mark done only after you finish it — that also saves the
+          follow-up as an Open future task. DNC is closed immediately.
         </p>
         {openTasks.length === 0 ? (
           <p className="text-sm text-muted-foreground">No open tasks.</p>
@@ -545,17 +557,35 @@ export default function PersonRecordPage() {
                       </span>
                     )}
                   </button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={
+                        expandedTaskId === task.id && completingId !== task.id
+                          ? "default"
+                          : "outline"
+                      }
+                      onClick={() =>
+                        expandedTaskId === task.id && completingId !== task.id
+                          ? setExpandedTaskId(null)
+                          : openTask(task)
+                      }
+                    >
+                      Save notes
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
                       openTask(task);
                       setCompletingId(task.id);
                     }}
                   >
                     Mark done
                   </Button>
+                  </div>
                 </div>
                 {expandedTaskId === task.id && completingId !== task.id ? (
                   <div className="space-y-2 rounded-md border bg-muted/30 p-2">
@@ -660,17 +690,29 @@ export default function PersonRecordPage() {
               Closed tasks ({closedTasks.length})
             </summary>
             <ul className="divide-y border-t">
-              {closedTasks.map((task) => (
+              {closedTasks.map((task) => {
+                const audit = completionAudit(task.id, timeline, users);
+                return (
                 <li key={task.id} className="px-3 py-2 text-sm">
-                  {TASK_KIND_LABELS[task.kind]} · {task.status} ·{" "}
+                  {TASK_KIND_LABELS[task.kind]} · {task.status} · due{" "}
                   {formatDateTime(task.dueAt)}
+                  {audit ? (
+                    <span className="block text-xs text-muted-foreground">
+                      Completed {formatDateTime(audit.when)} · {audit.who}
+                    </span>
+                  ) : (
+                    <span className="block text-xs text-muted-foreground">
+                      Closed {formatDateTime(task.updatedAt)}
+                    </span>
+                  )}
                   {task.notes ? (
                     <span className="block text-muted-foreground">
                       {task.notes}
                     </span>
                   ) : null}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </details>
         ) : null}
@@ -690,6 +732,7 @@ export default function PersonRecordPage() {
                 key={`${item.kind}-${item.occurredAt}-${index}`}
                 item={item}
                 active={index === selected}
+                users={users}
               />
             ))}
           </ol>
@@ -699,26 +742,45 @@ export default function PersonRecordPage() {
   );
 }
 
+function completionAudit(
+  taskId: string,
+  timeline: TimelineItem[],
+  users: User[],
+): { when: string; who: string } | null {
+  for (const item of timeline) {
+    if (item.kind !== "activity") {
+      continue;
+    }
+    if (completedTaskIdFromPayload(item.activity.payload) !== taskId) {
+      continue;
+    }
+    return {
+      when: item.occurredAt,
+      who: activityActorLabel(item.activity, users),
+    };
+  }
+  return null;
+}
+
 function TimelineRow({
   item,
   active,
+  users,
 }: {
   item: TimelineItem;
   active: boolean;
+  users: User[];
 }) {
   return (
     <li className={cn("px-3 py-2 text-sm", active && "bg-primary/10")}>
       <p className="text-xs text-muted-foreground">
         {formatDateTime(item.occurredAt)}
+        {item.kind === "activity"
+          ? ` · ${activityActorLabel(item.activity, users)}`
+          : ""}
       </p>
       {item.kind === "activity" ? (
-        <p>
-          <span className="text-xs uppercase text-muted-foreground">
-            {item.activity.type.replaceAll("_", " ")}
-          </span>
-          <span className="mx-1">·</span>
-          {activitySummary(item.activity)}
-        </p>
+        <p>{activitySummary(item.activity)}</p>
       ) : null}
       {item.kind === "email" ? (
         <p>

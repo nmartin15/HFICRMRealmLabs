@@ -3,7 +3,9 @@ import {
   canDeletePerson,
   canViewPerson,
   completeTaskBodySchema,
+  createPersonBodySchema,
   createPersonNoteBodySchema,
+  createPersonResponseSchema,
   createTaskBodySchema,
   currentBoardBadge,
   isPipelineBoardTrack,
@@ -37,6 +39,7 @@ import {
   type Database,
 } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
+import { createManualContact } from "../lib/contacts.js";
 import {
   emailThreadRowVisible,
   emailThreadsVisibleSql,
@@ -153,6 +156,25 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       return {
         data: rows.map((row) => personSchema.parse(serializePerson(row))),
       };
+    },
+  );
+
+  app.post(
+    "/people",
+    {
+      schema: {
+        body: createPersonBodySchema,
+        response: { 200: createPersonResponseSchema },
+      },
+    },
+    async (req) => {
+      const actor = requireUser(req);
+      if (!canViewPerson()) {
+        throw httpError(403, "FORBIDDEN", "Forbidden");
+      }
+      return createPersonResponseSchema.parse(
+        await createManualContact(app.db, actor, req.body),
+      );
     },
   );
 
@@ -687,15 +709,43 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         throw httpError(500, "INTERNAL", "Failed to complete task");
       }
 
+      const nextStatus = plan.next
+        ? plan.next.kind === "dnc"
+          ? "done"
+          : "open"
+        : null;
       if (plan.next) {
-        await app.db.insert(tasks).values({
+        const [createdNext] = await app.db
+          .insert(tasks)
+          .values({
+            personId: row.id,
+            kind: plan.next.kind,
+            dueAt: new Date(plan.next.dueAt),
+            notes: plan.next.notes,
+            status: nextStatus ?? "open",
+            outcome: plan.next.kind === "meeting" ? "scheduled" : null,
+            createdBy: actor.id,
+          })
+          .returning();
+        if (!createdNext) {
+          throw httpError(500, "INTERNAL", "Failed to create follow-up task");
+        }
+        await writeActivity(app.db, {
           personId: row.id,
-          kind: plan.next.kind,
-          dueAt: new Date(plan.next.dueAt),
-          notes: plan.next.notes,
-          status: plan.next.kind === "dnc" ? "done" : "open",
-          outcome: plan.next.kind === "meeting" ? "scheduled" : null,
-          createdBy: actor.id,
+          userId: actor.id,
+          type: "note",
+          payload: {
+            who: { id: actor.id, email: actor.email },
+            what: "task.create",
+            when: new Date().toISOString(),
+            before: null,
+            after: {
+              kind: createdNext.kind,
+              notes: createdNext.notes,
+              dueAt: createdNext.dueAt.toISOString(),
+              followUpFromTaskId: current.id,
+            },
+          },
         });
       }
       if (plan.setDoNotContact && !row.doNotContact) {
@@ -715,7 +765,20 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           what: "task.complete",
           when: when.toISOString(),
           before: { status: current.status },
-          after: { status: plan.status, notes: plan.notes, outcome: plan.outcome },
+          after: {
+            taskId: current.id,
+            kind: current.kind,
+            status: plan.status,
+            notes: plan.notes,
+            outcome: plan.outcome,
+            next: plan.next
+              ? {
+                  kind: plan.next.kind,
+                  dueAt: plan.next.dueAt,
+                  status: nextStatus,
+                }
+              : null,
+          },
         },
       });
       return taskSchema.parse(serializeTask(updated));

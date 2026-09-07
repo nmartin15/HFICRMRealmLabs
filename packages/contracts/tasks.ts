@@ -249,3 +249,54 @@ export function planCompleteTask(input: {
     },
   };
 }
+
+function taskKindLabel(kind: unknown): string {
+  if (kind === "email" || kind === "call" || kind === "meeting" || kind === "dnc") {
+    return TASK_KIND_LABELS[kind];
+  }
+  return "task";
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+export function describeTaskActivity(
+  payload: Record<string, unknown>,
+): string | null {
+  const what = typeof payload.what === "string" ? payload.what : "";
+  const after = asRecord(payload.after);
+
+  if (what === "task.complete") {
+    const kindLabel = taskKindLabel(after?.kind);
+    const status = typeof after?.status === "string" ? after.status : "done";
+    const next = asRecord(after?.next);
+    if (next) {
+      return `Completed ${kindLabel} (${status}) · saved follow-up ${taskKindLabel(next.kind)}`;
+    }
+    return `Completed ${kindLabel} (${status})`;
+  }
+
+  if (what === "task.create") {
+    const kindLabel = taskKindLabel(after?.kind);
+    if (after && typeof after.followUpFromTaskId === "string") {
+      return `Saved follow-up ${kindLabel}`;
+    }
+    return `Created ${kindLabel} task`;
+  }
+
+  return null;
+}
+
+export function completedTaskIdFromPayload(
+  payload: Record<string, unknown>,
+): string | null {
+  if (payload.what !== "task.complete") {
+    return null;
+  }
+  const after = asRecord(payload.after);
+  return typeof after?.taskId === "string" ? after.taskId : null;
+}
