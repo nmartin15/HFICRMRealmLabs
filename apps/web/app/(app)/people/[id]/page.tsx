@@ -22,6 +22,7 @@ import {
   LEAD_TEMP_LABELS,
   PROGRAM_TRACK_LABELS,
   TASK_KIND_LABELS,
+  classifyOpenTask,
   completedTaskIdFromPayload,
 } from "@realm-labs/contracts";
 import { api } from "@/lib/api";
@@ -98,6 +99,7 @@ export default function PersonRecordPage() {
   const [draftTaskNotes, setDraftTaskNotes] = useState("");
   const [personNotes, setPersonNotes] = useState("");
   const [saveHint, setSaveHint] = useState("");
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [personRes, userRes] = await Promise.all([
@@ -210,6 +212,21 @@ export default function PersonRecordPage() {
     }
   }
 
+  async function deleteTask(taskId: string) {
+    setError("");
+    try {
+      await api(`/people/${id}/tasks/${taskId}`, { method: "DELETE" });
+      setRemovingId(null);
+      setCompletingId(null);
+      setExpandedTaskId(null);
+      setSaveHint("Task removed");
+      window.setTimeout(() => setSaveHint(""), 1500);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove task");
+    }
+  }
+
   function openTask(task: Task) {
     setExpandedTaskId(task.id);
     setDraftTaskNotes(task.notes ?? "");
@@ -247,8 +264,41 @@ export default function PersonRecordPage() {
 
   const person = detail.person;
   const name = `${person.firstName} ${person.lastName}`;
-  const openTasks = detail.tasks.filter((task) => task.status === "open");
-  const closedTasks = detail.tasks.filter((task) => task.status !== "open");
+  const activityPayloads = timeline
+    .filter(
+      (item): item is Extract<TimelineItem, { kind: "activity" }> =>
+        item.kind === "activity",
+    )
+    .map((item) => item.activity.payload);
+  const nowMs = Date.now();
+  const openTasks = detail.tasks.filter((task) => {
+    if (task.status !== "open") {
+      return false;
+    }
+    return (
+      classifyOpenTask({
+        id: task.id,
+        kind: task.kind,
+        dueAt: task.dueAt,
+        nowMs,
+        payloads: activityPayloads,
+      }) !== "leftover"
+    );
+  });
+  const closedTasks = detail.tasks.filter((task) => {
+    if (task.status !== "open") {
+      return true;
+    }
+    return (
+      classifyOpenTask({
+        id: task.id,
+        kind: task.kind,
+        dueAt: task.dueAt,
+        nowMs,
+        payloads: activityPayloads,
+      }) === "leftover"
+    );
+  });
 
   return (
     <div className="space-y-6">
@@ -520,43 +570,59 @@ export default function PersonRecordPage() {
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Tasks</h2>
         <p className="text-xs text-muted-foreground">
-          New email/call/meeting tasks stay Open. Save notes anytime.
-          Use Mark done only after you finish it — that also saves the
-          follow-up as an Open future task. DNC is closed immediately.
+          Save notes keeps a task open (prep for the email or call).
+          I finished this closes it after you actually did the work.
+          A next follow-up is asked only when this is the last open task.
+          Closed tasks are history. The only action is a quiet
+          “Completed in error” if you closed the wrong one.
+          {saveHint ? ` · ${saveHint}` : ""}
         </p>
         {openTasks.length === 0 ? (
           <p className="text-sm text-muted-foreground">No open tasks.</p>
         ) : (
           <ul className="divide-y rounded-lg border">
-            {openTasks.map((task) => (
+            {openTasks.map((task) => {
+              const guide = classifyOpenTask({
+                id: task.id,
+                kind: task.kind,
+                dueAt: task.dueAt,
+                nowMs,
+                payloads: activityPayloads,
+              });
+              const copy = taskGuideCopy(guide, TASK_KIND_LABELS[task.kind], task);
+              const otherOpen = openTasks.filter((row) => row.id !== task.id).length;
+              return (
               <li key={task.id} className="space-y-2 px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <button
                     type="button"
                     className="min-w-0 flex-1 text-left"
-                    onClick={() =>
+                    onClick={() => {
+                      if (completingId === task.id) {
+                        return;
+                      }
                       expandedTaskId === task.id
                         ? setExpandedTaskId(null)
-                        : openTask(task)
-                    }
+                        : openTask(task);
+                    }}
                   >
                     <p>
                       <span className="mr-2 rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                        Open
+                        {copy.badge}
                       </span>
-                      {TASK_KIND_LABELS[task.kind]} ·{" "}
+                      {TASK_KIND_LABELS[task.kind]} · due{" "}
                       {formatDateTime(task.dueAt)}
                     </p>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {copy.hint}
+                    </span>
                     {task.notes ? (
                       <span className="mt-0.5 block text-muted-foreground">
                         {task.notes}
                       </span>
-                    ) : (
-                      <span className="mt-0.5 block text-xs text-muted-foreground">
-                        No notes yet — click to add context
-                      </span>
-                    )}
+                    ) : null}
                   </button>
+                  {completingId === task.id ? null : (
                   <div className="flex flex-wrap gap-2">
                     <Button
                       type="button"
@@ -572,24 +638,59 @@ export default function PersonRecordPage() {
                           : openTask(task)
                       }
                     >
-                      Save notes
+                      Add notes
                     </Button>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
                       onClick={() => {
-                      openTask(task);
-                      setCompletingId(task.id);
-                    }}
-                  >
-                    Mark done
-                  </Button>
+                        setRemovingId(null);
+                        openTask(task);
+                        setCompletingId(task.id);
+                      }}
+                    >
+                      I finished this
+                    </Button>
+                    {removingId === task.id ? (
+                      <>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void deleteTask(task.id)}
+                        >
+                          Confirm remove
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setRemovingId(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setRemovingId(task.id)}
+                      >
+                        Remove
+                      </Button>
+                    )}
                   </div>
+                  )}
                 </div>
                 {expandedTaskId === task.id && completingId !== task.id ? (
                   <div className="space-y-2 rounded-md border bg-muted/30 p-2">
-                    <Label htmlFor={`task-notes-${task.id}`}>Task notes</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Save notes keeps this {TASK_KIND_LABELS[task.kind].toLowerCase()}{" "}
+                      open. It does not close the task.
+                    </p>
+                    <Label htmlFor={`task-notes-${task.id}`}>Notes for this task</Label>
                     <textarea
                       id={`task-notes-${task.id}`}
                       rows={3}
@@ -604,7 +705,7 @@ export default function PersonRecordPage() {
                         size="sm"
                         onClick={() => void saveTaskNotes(task.id)}
                       >
-                        Save notes
+                        Save notes — keep open
                       </Button>
                       <Button
                         type="button"
@@ -620,12 +721,15 @@ export default function PersonRecordPage() {
                 {completingId === task.id ? (
                   <CompleteTaskForm
                     task={task}
+                    requireFollowUp={otherOpen === 0}
+                    guide={guide === "overdue" || guide === "follow-up" ? guide : "todo"}
                     onCancel={() => setCompletingId(null)}
                     onSubmit={(body) => void completeTask(task.id, body)}
                   />
                 ) : null}
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
 
@@ -694,6 +798,8 @@ export default function PersonRecordPage() {
                 const audit = completionAudit(task.id, timeline, users);
                 return (
                 <li key={task.id} className="px-3 py-2 text-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
                   {TASK_KIND_LABELS[task.kind]} · {task.status} · due{" "}
                   {formatDateTime(task.dueAt)}
                   {audit ? (
@@ -710,6 +816,14 @@ export default function PersonRecordPage() {
                       {task.notes}
                     </span>
                   ) : null}
+                    </div>
+                    <CompletedInErrorControl
+                      confirm={removingId === task.id}
+                      onAsk={() => setRemovingId(task.id)}
+                      onCancel={() => setRemovingId(null)}
+                      onConfirm={() => void deleteTask(task.id)}
+                    />
+                  </div>
                 </li>
                 );
               })}
@@ -740,6 +854,80 @@ export default function PersonRecordPage() {
       </section>
     </div>
   );
+}
+
+function CompletedInErrorControl({
+  confirm,
+  onAsk,
+  onCancel,
+  onConfirm,
+}: {
+  confirm: boolean;
+  onAsk: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (confirm) {
+    return (
+      <p className="max-w-[12rem] text-right text-[11px] leading-snug text-muted-foreground">
+        Completed in error?
+        <button
+          type="button"
+          className="ml-1 underline hover:text-foreground"
+          onClick={onConfirm}
+        >
+          Remove it
+        </button>
+        <button
+          type="button"
+          className="ml-1 hover:text-foreground"
+          onClick={onCancel}
+        >
+          Keep
+        </button>
+      </p>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="text-[11px] text-muted-foreground/60 hover:text-muted-foreground"
+      onClick={onAsk}
+    >
+      Completed in error
+    </button>
+  );
+}
+
+function taskGuideCopy(
+  guide: ReturnType<typeof classifyOpenTask>,
+  kindLabel: string,
+  task: Task,
+): { badge: string; hint: string } {
+  const due = formatDateTime(task.dueAt);
+  const saved = formatDateTime(task.createdAt);
+  if (guide === "leftover") {
+    return {
+      badge: "Already logged",
+      hint: `This ${kindLabel.toLowerCase()} is already on the timeline as completed. It is not actionable.`,
+    };
+  }
+  if (guide === "overdue") {
+    return {
+      badge: "Overdue",
+      hint: `Due ${due} has passed. Use I finished this only if you already did this ${kindLabel.toLowerCase()}.`,
+    };
+  }
+  if (guide === "follow-up") {
+    return {
+      badge: "Follow-up",
+      hint: `Next step · due ${due} · saved ${saved}. Add notes to prepare. I finished this only after you do the work.`,
+    };
+  }
+  return {
+    badge: "To do",
+    hint: `Due ${due} · saved ${saved}. Save notes keeps it open. I finished this closes it after you do the work.`,
+  };
 }
 
 function completionAudit(

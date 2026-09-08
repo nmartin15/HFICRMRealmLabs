@@ -24,15 +24,20 @@ const OUTCOME_LABELS: Record<(typeof HAND_SET_MEETING_OUTCOMES)[number], string>
 
 export function CompleteTaskForm({
   task,
+  requireFollowUp = true,
+  guide = "todo",
   onCancel,
   onSubmit,
 }: {
   task: Pick<Task, "id" | "kind" | "notes">;
+  requireFollowUp?: boolean;
+  guide?: "overdue" | "follow-up" | "todo";
   onCancel: () => void;
   onSubmit: (body: CompleteTaskBody) => void;
 }) {
   const isDnc = task.kind === "dnc";
   const isMeeting = task.kind === "meeting";
+  const needsFollowUp = !isDnc && requireFollowUp;
   const [notes, setNotes] = useState(task.notes ?? "");
   const [outcome, setOutcome] = useState<(typeof HAND_SET_MEETING_OUTCOMES)[number]>(
     "held",
@@ -53,7 +58,7 @@ export function CompleteTaskForm({
         if (isMeeting) {
           body.outcome = outcome;
         }
-        if (!isDnc) {
+        if (needsFollowUp) {
           body.next = {
             kind: nextKind,
             dueAt: fromDatetimeLocalValue(nextDue),
@@ -82,7 +87,7 @@ export function CompleteTaskForm({
         </fieldset>
       ) : null}
       <div className="space-y-1">
-        <Label htmlFor={`complete-notes-${task.id}`}>Notes</Label>
+        <Label htmlFor={`complete-notes-${task.id}`}>Completion notes</Label>
         <textarea
           id={`complete-notes-${task.id}`}
           rows={2}
@@ -96,10 +101,12 @@ export function CompleteTaskForm({
         <p className="text-xs text-muted-foreground">
           DNC does not need a follow-up.
         </p>
-      ) : (
+      ) : needsFollowUp ? (
         <>
           <p className="text-xs text-muted-foreground">
-            Follow-up task — saved as Open. It is not marked done.
+            {guide === "overdue"
+              ? "Due date passed. Closing this records that you finished the work. Then set the next follow-up — it stays open until you do that later work."
+              : "Closing this records that you finished the work. Then set the next follow-up — it stays open until you do that later work."}
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1">
@@ -142,13 +149,20 @@ export function CompleteTaskForm({
             </div>
           </div>
         </>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          You already have another open task. Closing this does not create
+          another follow-up.
+        </p>
       )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           Cancel
         </Button>
         <Button type="submit" size="sm">
-          {isDnc ? "Mark done" : "Mark done & save follow-up"}
+          {needsFollowUp
+            ? "Close this and set the next follow-up"
+            : "Close this task"}
         </Button>
       </div>
     </form>

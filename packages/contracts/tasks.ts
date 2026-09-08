@@ -173,6 +173,7 @@ export function planCompleteTask(input: {
   next: { kind: TaskKind; dueAt: string; notes?: string } | undefined;
   personDoNotContact: boolean;
   personDeleted: boolean;
+  otherOpenTaskCount?: number;
 }): PlanCompleteTaskSuccess | PlanTaskWriteError {
   if (input.personDeleted) {
     return fail(409, "PERSON_DELETED", "Person is deleted");
@@ -213,6 +214,18 @@ export function planCompleteTask(input: {
     outcome === "rescheduled" ? "rescheduled" : "done";
 
   if (input.personDoNotContact) {
+    return {
+      ok: true,
+      notes,
+      setDoNotContact: false,
+      status,
+      outcome,
+      next: null,
+    };
+  }
+
+  const otherOpenTaskCount = input.otherOpenTaskCount ?? 0;
+  if (otherOpenTaskCount > 0) {
     return {
       ok: true,
       notes,
@@ -288,6 +301,11 @@ export function describeTaskActivity(
     return `Created ${kindLabel} task`;
   }
 
+  if (what === "task.delete") {
+    const before = asRecord(payload.before);
+    return `Removed ${taskKindLabel(before?.kind)} task`;
+  }
+
   return null;
 }
 
@@ -299,4 +317,47 @@ export function completedTaskIdFromPayload(
   }
   const after = asRecord(payload.after);
   return typeof after?.taskId === "string" ? after.taskId : null;
+}
+
+export function isFollowUpTask(
+  task: { id: string; kind: string; dueAt: string },
+  payloads: Record<string, unknown>[],
+): boolean {
+  for (const payload of payloads) {
+    if (payload.what !== "task.create") {
+      continue;
+    }
+    const after = asRecord(payload.after);
+    if (!after || typeof after.followUpFromTaskId !== "string") {
+      continue;
+    }
+    if (after.taskId === task.id) {
+      return true;
+    }
+    if (after.kind === task.kind && after.dueAt === task.dueAt) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export type OpenTaskGuide = "leftover" | "overdue" | "follow-up" | "todo";
+
+export function classifyOpenTask(input: {
+  id: string;
+  kind: string;
+  dueAt: string;
+  nowMs: number;
+  payloads: Record<string, unknown>[];
+}): OpenTaskGuide {
+  if (input.payloads.some((payload) => completedTaskIdFromPayload(payload) === input.id)) {
+    return "leftover";
+  }
+  if (isFollowUpTask(input, input.payloads)) {
+    return "follow-up";
+  }
+  if (new Date(input.dueAt).getTime() < input.nowMs) {
+    return "overdue";
+  }
+  return "todo";
 }

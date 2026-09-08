@@ -179,7 +179,7 @@ export default function HomePage() {
                         )
                       }
                     >
-                      Close
+                      Log call outcome
                     </button>
                   ) : null}
                 </div>

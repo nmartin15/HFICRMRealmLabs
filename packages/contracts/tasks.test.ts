@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyOpenTask,
   describeTaskActivity,
+  isFollowUpTask,
   planCompleteTask,
   planCreateTask,
   planUpdateTaskNotes,
@@ -174,6 +176,28 @@ describe("planCompleteTask", () => {
       outcome: "rescheduled",
     });
   });
+
+  it("does not create another follow-up when one is already open", () => {
+    expect(
+      planCompleteTask({
+        currentKind: "email",
+        currentStatus: "open",
+        notes: "Sent",
+        outcome: undefined,
+        next: {
+          kind: "call",
+          dueAt: "2026-09-12T16:00:00.000Z",
+        },
+        personDoNotContact: false,
+        personDeleted: false,
+        otherOpenTaskCount: 1,
+      }),
+    ).toMatchObject({
+      ok: true,
+      status: "done",
+      next: null,
+    });
+  });
 });
 
 describe("describeTaskActivity", () => {
@@ -201,5 +225,61 @@ describe("describeTaskActivity", () => {
         },
       }),
     ).toBe("Saved follow-up Email");
+  });
+});
+
+describe("isFollowUpTask", () => {
+  it("matches a follow-up by created task id", () => {
+    expect(
+      isFollowUpTask(
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          kind: "email",
+          dueAt: "2026-09-08T16:00:00.000Z",
+        },
+        [
+          {
+            what: "task.create",
+            after: {
+              taskId: "22222222-2222-4222-8222-222222222222",
+              kind: "email",
+              dueAt: "2026-09-08T16:00:00.000Z",
+              followUpFromTaskId: "11111111-1111-4111-8111-111111111111",
+            },
+          },
+        ],
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("classifyOpenTask", () => {
+  it("labels a still-open task leftover when timeline already completed it", () => {
+    expect(
+      classifyOpenTask({
+        id: "22222222-2222-4222-8222-222222222222",
+        kind: "email",
+        dueAt: "2026-09-07T16:00:00.000Z",
+        nowMs: Date.parse("2026-09-07T20:00:00.000Z"),
+        payloads: [
+          {
+            what: "task.complete",
+            after: { taskId: "22222222-2222-4222-8222-222222222222" },
+          },
+        ],
+      }),
+    ).toBe("leftover");
+  });
+
+  it("labels a past-due open task overdue", () => {
+    expect(
+      classifyOpenTask({
+        id: "22222222-2222-4222-8222-222222222222",
+        kind: "email",
+        dueAt: "2026-09-07T16:00:00.000Z",
+        nowMs: Date.parse("2026-09-07T20:00:00.000Z"),
+        payloads: [],
+      }),
+    ).toBe("overdue");
   });
 });

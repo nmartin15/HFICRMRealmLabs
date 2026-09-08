@@ -27,7 +27,7 @@ import {
 } from "@realm-labs/contracts";
 import { z } from "zod";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import {
   activities,
   allocationCards,
@@ -682,6 +682,17 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!current) {
         throw httpError(404, "NOT_FOUND", "Task not found");
       }
+      const siblingOpen = await app.db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.personId, row.id),
+            eq(tasks.status, "open"),
+            ne(tasks.id, current.id),
+          ),
+        );
+      const otherOpenTaskCount = siblingOpen.length;
       const plan = planCompleteTask({
         currentKind: current.kind,
         currentStatus: current.status,
@@ -690,6 +701,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         next: req.body.next,
         personDoNotContact: row.doNotContact,
         personDeleted: Boolean(row.deletedAt),
+        otherOpenTaskCount,
       });
       if (!plan.ok) {
         throw httpError(plan.status, plan.code, plan.message);
@@ -740,6 +752,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
             when: new Date().toISOString(),
             before: null,
             after: {
+              taskId: createdNext.id,
               kind: createdNext.kind,
               notes: createdNext.notes,
               dueAt: createdNext.dueAt.toISOString(),
@@ -782,6 +795,50 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       });
       return taskSchema.parse(serializeTask(updated));
+    },
+  );
+
+  app.delete(
+    "/people/:id/tasks/:taskId",
+    {
+      schema: {
+        params: z.object({ id: uuidSchema, taskId: uuidSchema }),
+        response: { 200: okResponseSchema },
+      },
+    },
+    async (req) => {
+      const actor = requireUser(req);
+      const row = await requirePerson(app.db, req.params.id);
+      const [current] = await app.db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.id, req.params.taskId), eq(tasks.personId, row.id)))
+        .limit(1);
+      if (!current) {
+        throw httpError(404, "NOT_FOUND", "Task not found");
+      }
+
+      await app.db.delete(tasks).where(eq(tasks.id, current.id));
+      const when = new Date();
+      await writeActivity(app.db, {
+        personId: row.id,
+        userId: actor.id,
+        type: "note",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "task.delete",
+          when: when.toISOString(),
+          before: {
+            taskId: current.id,
+            kind: current.kind,
+            status: current.status,
+            dueAt: current.dueAt.toISOString(),
+            notes: current.notes,
+          },
+          after: null,
+        },
+      });
+      return { ok: true as const };
     },
   );
 
