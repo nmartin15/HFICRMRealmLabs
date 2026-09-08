@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DISPLAY_TIME_ZONE,
+  isWithinUtcBounds,
   todayBoundsUtc,
   yesterdayBoundsUtc,
   zonedIsoDate,
@@ -29,5 +30,11 @@ describe("yesterday bounds in America/Los_Angeles", () => {
     const { start, end } = todayBoundsUtc(now);
     expect(start.toISOString()).toBe("2026-08-24T07:00:00.000Z");
     expect(end.toISOString()).toBe("2026-08-25T07:00:00.000Z");
+    expect(
+      isWithinUtcBounds(new Date("2026-08-24T16:00:00.000Z"), { start, end }),
+    ).toBe(true);
+    expect(
+      isWithinUtcBounds(new Date("2026-08-24T06:59:59.000Z"), { start, end }),
+    ).toBe(false);
   });
 });

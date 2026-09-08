@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildHomeTodos,
   homeCounts,
+  homeEmailItemSchema,
   meetingTaskNeedsOutcome,
 } from "./home";
 import type { HomeScheduleItem } from "./home";
@@ -130,5 +131,33 @@ describe("home day snapshot", () => {
     expect(counts.meetings).toBe(3);
     expect(counts.calls).toBe(4);
     expect(counts.emails).toBe(4);
+  });
+
+  it("treats a CRM email task as an Emails today item", () => {
+    const dueAt = "2026-08-25T16:00:00.000Z";
+    const parsed = homeEmailItemSchema.parse({
+      kind: "task",
+      person,
+      task: {
+        id: "88888888-8888-4888-8888-888888888888",
+        personId: person.id,
+        kind: "email",
+        dueAt,
+        notes: "Send intro",
+        status: "open",
+        calendarEventId: null,
+        outcome: null,
+        needsReview: false,
+        createdBy: "33333333-3333-4333-8333-333333333333",
+        createdAt: dueAt,
+        updatedAt: dueAt,
+      },
+    });
+    expect(parsed.kind).toBe("task");
+    if (parsed.kind !== "task") {
+      throw new Error("expected task");
+    }
+    expect(parsed.person.lastName).toBe("Lovelace");
+    expect(parsed.task.kind).toBe("email");
   });
 });

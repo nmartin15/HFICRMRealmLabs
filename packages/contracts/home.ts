@@ -56,10 +56,18 @@ export const homeTodoSchema = z.object({
 });
 export type HomeTodo = z.infer<typeof homeTodoSchema>;
 
-export const homeEmailItemSchema = z.object({
-  thread: emailThreadSchema,
-  person: meetingDigestPersonSchema.nullable(),
-});
+export const homeEmailItemSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("task"),
+    task: taskSchema,
+    person: meetingDigestPersonSchema,
+  }),
+  z.object({
+    kind: z.literal("thread"),
+    thread: emailThreadSchema,
+    person: meetingDigestPersonSchema.nullable(),
+  }),
+]);
 export type HomeEmailItem = z.infer<typeof homeEmailItemSchema>;
 
 export const homeCallInputSchema = z.object({

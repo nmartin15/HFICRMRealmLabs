@@ -127,6 +127,123 @@ export default function HomePage() {
       ) : null}
 
       <section className="space-y-2">
+        <h2 className="text-sm font-medium">Schedule</h2>
+        <p className="text-xs text-muted-foreground">
+          Calls and meetings on the calendar today.
+        </p>
+        {!loaded ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : !snapshot || snapshot.schedule.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No calls scheduled today.
+          </p>
+        ) : (
+          <ul className="divide-y rounded-lg border">
+            {snapshot.schedule.map((item) => {
+              const due = meetingTaskNeedsOutcome(
+                item.task.dueAt,
+                item.task.status,
+                now,
+                item.task.needsReview,
+              );
+              return (
+                <li
+                  key={item.task.id}
+                  className="flex flex-wrap items-center justify-between gap-3 px-3 py-2"
+                >
+                  <div>
+                    <p className="flex flex-wrap items-baseline gap-x-2">
+                      <span className="font-mono text-[11px] uppercase tracking-wide text-canary">
+                        Call
+                      </span>
+                      <Link
+                        href={`/people/${item.person.id}`}
+                        className="text-sm font-medium hover:underline"
+                      >
+                        {personDisplayName(item.person)}
+                      </Link>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatTime(item.task.dueAt)}
+                      {due ? " · needs outcome" : ""}
+                      {item.task.needsReview ? " · needs review" : ""}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium">Emails today</h2>
+        <p className="text-xs text-muted-foreground">
+          Email tasks due today, plus inbox threads with activity today.
+        </p>
+        {!loaded ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : !snapshot || snapshot.emails.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No emails today.</p>
+        ) : (
+          <ul className="divide-y rounded-lg border">
+            {snapshot.emails.map((item) => {
+              if (item.kind === "task") {
+                return (
+                  <li key={`task:${item.task.id}`} className="px-3 py-2">
+                    <p className="flex flex-wrap items-baseline gap-x-2">
+                      <span className="font-mono text-[11px] uppercase tracking-wide text-teal">
+                        Email
+                      </span>
+                      <Link
+                        href={`/people/${item.person.id}`}
+                        className="text-sm font-medium hover:underline"
+                      >
+                        {personDisplayName(item.person)}
+                      </Link>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatTime(item.task.dueAt)}
+                      {item.task.notes ? ` · ${item.task.notes}` : ""}
+                    </p>
+                  </li>
+                );
+              }
+              const href = item.person
+                ? `/people/${item.person.id}`
+                : "/inbox/unmatched";
+              return (
+                <li key={`thread:${item.thread.id}`} className="px-3 py-2">
+                  <p className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="font-mono text-[11px] uppercase tracking-wide text-teal">
+                      Email
+                    </span>
+                    <Link
+                      href={href}
+                      className="text-sm font-medium hover:underline"
+                    >
+                      {item.thread.subject || "(no subject)"}
+                    </Link>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatTime(item.thread.lastMessageAt)}
+                    {item.person
+                      ? ` · ${personDisplayName(item.person)}`
+                      : " · unmatched"}
+                  </p>
+                  {item.thread.snippet ? (
+                    <p className="mt-1 truncate text-sm text-muted-foreground">
+                      {item.thread.snippet}
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="space-y-2">
         <h2 className="text-sm font-medium">To do</h2>
         {!loaded ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
@@ -201,99 +318,6 @@ export default function HomePage() {
                 ) : null}
               </li>
             ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium">Schedule</h2>
-        <p className="text-xs text-muted-foreground">
-          Calls and meetings on the calendar today.
-        </p>
-        {!loaded ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : !snapshot || snapshot.schedule.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No calls scheduled today.
-          </p>
-        ) : (
-          <ul className="divide-y rounded-lg border">
-            {snapshot.schedule.map((item) => {
-              const due = meetingTaskNeedsOutcome(
-                item.task.dueAt,
-                item.task.status,
-                now,
-                item.task.needsReview,
-              );
-              return (
-                <li
-                  key={item.task.id}
-                  className="flex flex-wrap items-center justify-between gap-3 px-3 py-2"
-                >
-                  <div>
-                    <p className="flex flex-wrap items-baseline gap-x-2">
-                      <span className="font-mono text-[11px] uppercase tracking-wide text-canary">
-                        Call
-                      </span>
-                      <Link
-                        href={`/people/${item.person.id}`}
-                        className="text-sm font-medium hover:underline"
-                      >
-                        {personDisplayName(item.person)}
-                      </Link>
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatTime(item.task.dueAt)}
-                      {due ? " · needs outcome" : ""}
-                      {item.task.needsReview ? " · needs review" : ""}
-                    </p>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium">Emails today</h2>
-        {!loaded ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : !snapshot || snapshot.emails.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No emails today.</p>
-        ) : (
-          <ul className="divide-y rounded-lg border">
-            {snapshot.emails.map((item) => {
-              const href = item.person
-                ? `/people/${item.person.id}`
-                : "/inbox/unmatched";
-              return (
-                <li key={item.thread.id} className="px-3 py-2">
-                  <p className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="font-mono text-[11px] uppercase tracking-wide text-teal">
-                      Email
-                    </span>
-                    <Link
-                      href={href}
-                      className="text-sm font-medium hover:underline"
-                    >
-                      {item.thread.subject || "(no subject)"}
-                    </Link>
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatTime(item.thread.lastMessageAt)}
-                    {item.person
-                      ? ` · ${personDisplayName(item.person)}`
-                      : " · unmatched"}
-                  </p>
-                  {item.thread.snippet ? (
-                    <p className="mt-1 truncate text-sm text-muted-foreground">
-                      {item.thread.snippet}
-                    </p>
-                  ) : null}
-                </li>
-              );
-            })}
           </ul>
         )}
       </section>

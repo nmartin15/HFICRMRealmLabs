@@ -106,6 +106,14 @@ export function todayBoundsUtc(
   return zonedDayBoundsUtc(zonedYmd(now, timeZone), timeZone);
 }
 
+export function isWithinUtcBounds(
+  instant: Date,
+  bounds: { start: Date; end: Date },
+): boolean {
+  const ms = instant.getTime();
+  return ms >= bounds.start.getTime() && ms < bounds.end.getTime();
+}
+
 /** Yesterday in `timeZone` (default America/Los_Angeles), as UTC bounds. */
 export function yesterdayBoundsUtc(
   now: Date,

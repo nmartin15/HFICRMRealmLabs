@@ -7,6 +7,7 @@ import {
   homeCounts,
   homeSnapshotResponseSchema,
   isIncubatorWaitingStage,
+  isWithinUtcBounds,
   meetingDigestPersonSchema,
   todayBoundsUtc,
   zonedIsoDate,
@@ -241,8 +242,13 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           .map((item) => item.task.id),
       ]);
 
+      const todayEmailTasks: HomeScheduleItem[] = [];
       const openTasks: HomeOpenTaskInput[] = [];
       for (const row of openTaskRows) {
+        if (row.task.kind === "email" && isWithinUtcBounds(row.task.dueAt, today)) {
+          todayEmailTasks.push(toScheduleItem(row));
+          continue;
+        }
         if (row.task.kind === "call" || row.task.kind === "meeting") {
           skipCallPersonIds.add(row.person.id);
         }
@@ -331,14 +337,22 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         now,
       });
 
-      const emails = todayEmailRows
-        .filter((row) => emailThreadRowVisible(row.thread, user, owner))
-        .map((row) => ({
-          thread: emailThreadSchema.parse(serializeEmailThread(row.thread)),
-          person: row.person
-            ? digestPerson(serializePerson(row.person))
-            : null,
-        }));
+      const emails = [
+        ...todayEmailTasks.map((item) => ({
+          kind: "task" as const,
+          task: item.task,
+          person: item.person,
+        })),
+        ...todayEmailRows
+          .filter((row) => emailThreadRowVisible(row.thread, user, owner))
+          .map((row) => ({
+            kind: "thread" as const,
+            thread: emailThreadSchema.parse(serializeEmailThread(row.thread)),
+            person: row.person
+              ? digestPerson(serializePerson(row.person))
+              : null,
+          })),
+      ];
 
       return homeSnapshotResponseSchema.parse({
         date: todayYmd,
@@ -349,7 +363,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           todos,
           leftoverCount: leftoverMeetings.length,
           scheduleCount: todayMeetings.length,
-          emailCount: emails.filter((item) => item.person !== null).length,
+          emailCount: emails.length,
         }),
       });
     },
