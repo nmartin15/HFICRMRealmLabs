@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  describeIncubatorActivity,
   evaluateIncubatorMove,
   incubatorBoardTotals,
   incubatorPipelineValue,
   INCUBATOR_STAGE_WEIGHTS,
   isBudgetQualified,
   isIncubatorOpenStage,
+  shouldClearIncubatorTrack,
   type IncubatorMoveInput,
 } from "./incubator";
 
@@ -32,6 +34,20 @@ describe("budget qualified", () => {
     expect(isBudgetQualified("heavy")).toBe(true);
     expect(isBudgetQualified("not_qualified")).toBe(false);
     expect(isBudgetQualified("unknown")).toBe(false);
+  });
+});
+
+describe("incubator card delete", () => {
+  it("clears incubator track only", () => {
+    expect(shouldClearIncubatorTrack("incubator")).toBe(true);
+    expect(shouldClearIncubatorTrack("allocation")).toBe(false);
+    expect(shouldClearIncubatorTrack(null)).toBe(false);
+  });
+
+  it("labels the delete on the timeline", () => {
+    expect(
+      describeIncubatorActivity({ what: "incubator.card_delete" }),
+    ).toBe("Deleted incubator card");
   });
 });
 

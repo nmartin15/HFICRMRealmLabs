@@ -184,3 +184,19 @@ export function personDisplayName(person: {
 }): string {
   return `${person.firstName} ${person.lastName}`.trim();
 }
+
+export function shouldClearPipelineTrack(
+  programTrack: ProgramTrack | null,
+): boolean {
+  return isPipelineBoardTrack(programTrack);
+}
+
+export function describeAllocationActivity(
+  payload: Record<string, unknown>,
+): string | null {
+  const what = typeof payload.what === "string" ? payload.what : "";
+  if (what === "allocation.card_delete") {
+    return "Deleted pipeline card";
+  }
+  return null;
+}

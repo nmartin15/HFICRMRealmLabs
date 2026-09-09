@@ -26,6 +26,7 @@ import { formatDate } from "@/lib/format";
 import { isTypingTarget } from "@/hooks/use-list-navigation";
 import { ApplicantDialog } from "@/components/applicant-dialog";
 import { DecisionDialog } from "@/components/decision-dialog";
+import { CloseReasonDialog } from "@/components/incubator-dialogs";
 import { LeadTempDot } from "@/components/lead-temp-dot";
 import { NoteDialog } from "@/components/note-dialog";
 import { Button } from "@/components/ui/button";
@@ -41,10 +42,12 @@ export function PipelineBoard({ track }: { track: PipelineBoardTrack }) {
   const [columnIndex, setColumnIndex] = useState(0);
   const [cardIndex, setCardIndex] = useState(0);
   const [menuCardId, setMenuCardId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [decisionCard, setDecisionCard] = useState<AllocationBoardCard | null>(
     null,
   );
   const [noteCard, setNoteCard] = useState<AllocationBoardCard | null>(null);
+  const [rejectCard, setRejectCard] = useState<AllocationBoardCard | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [closedOpen, setClosedOpen] = useState(false);
   const [closedFilter, setClosedFilter] = useState<ClosedFilter>("all");
@@ -86,7 +89,7 @@ export function PipelineBoard({ track }: { track: PipelineBoardTrack }) {
     });
   }, [columnIndex, columns]);
 
-  const dialogOpen = Boolean(decisionCard || noteCard || createOpen);
+  const dialogOpen = Boolean(decisionCard || noteCard || rejectCard || createOpen);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -189,6 +192,44 @@ export function PipelineBoard({ track }: { track: PipelineBoardTrack }) {
     }
   }
 
+  function requestReject(card: AllocationBoardCard) {
+    setMenuCardId(null);
+    setConfirmDeleteId(null);
+    setRejectCard(card);
+  }
+
+  async function rejectCardWithReason(reason: string) {
+    if (!rejectCard) {
+      return;
+    }
+    setError("");
+    try {
+      await api(`/allocation/${rejectCard.card.id}/decide`, {
+        method: "POST",
+        body: JSON.stringify({
+          decision: "pass",
+          passReason: reason,
+        }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reject card");
+      throw err;
+    }
+  }
+
+  async function deleteCard(card: AllocationBoardCard) {
+    setError("");
+    setMenuCardId(null);
+    setConfirmDeleteId(null);
+    try {
+      await api(`/allocation/${card.card.id}`, { method: "DELETE" });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete card");
+    }
+  }
+
   const closedCards = (board?.closed ?? []).filter((item) =>
     closedFilter === "all" ? true : item.card.stage === closedFilter,
   );
@@ -264,12 +305,18 @@ export function PipelineBoard({ track }: { track: PipelineBoardTrack }) {
                     setCardIndex(cardIdx);
                   }}
                   onOpen={() => router.push(`/people/${card.person.id}`)}
-                  onToggleMenu={() =>
+                  onToggleMenu={() => {
+                    setConfirmDeleteId(null);
                     setMenuCardId((current) =>
                       current === card.card.id ? null : card.card.id,
-                    )
-                  }
+                    );
+                  }}
                   onSendAppLink={() => void sendAppLink(card)}
+                  onReject={() => requestReject(card)}
+                  confirmDelete={confirmDeleteId === card.card.id}
+                  onAskDelete={() => setConfirmDeleteId(card.card.id)}
+                  onCancelDelete={() => setConfirmDeleteId(null)}
+                  onConfirmDelete={() => void deleteCard(card)}
                 />
               ))}
             </ul>
@@ -282,6 +329,18 @@ export function PipelineBoard({ track }: { track: PipelineBoardTrack }) {
         onToggle={(event) =>
           setClosedOpen((event.target as HTMLDetailsElement).open)
         }
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          const cardId = event.dataTransfer.getData("text/plain");
+          const card = findPipelineCard(board, cardId);
+          if (card) {
+            requestReject(card);
+          }
+        }}
         className="rounded-lg border"
       >
         <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
@@ -313,19 +372,55 @@ export function PipelineBoard({ track }: { track: PipelineBoardTrack }) {
             <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {closedCards.map((card) => (
                 <li key={card.card.id}>
-                  <button
-                    type="button"
-                    className="w-full rounded-lg border bg-card p-2 text-left text-sm"
-                    onClick={() => router.push(`/people/${card.person.id}`)}
-                  >
-                    <p className="font-medium">
-                      {personDisplayName(card.person)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {ALLOCATION_STAGE_LABELS[card.card.stage]}
-                      {card.person.company ? ` · ${card.person.company}` : ""}
-                    </p>
-                  </button>
+                  <article className="rounded-lg border bg-card p-2 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() =>
+                          router.push(`/people/${card.person.id}`)
+                        }
+                      >
+                        <p className="font-medium">
+                          {personDisplayName(card.person)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {ALLOCATION_STAGE_LABELS[card.card.stage]}
+                          {card.card.passReason
+                            ? ` · ${card.card.passReason}`
+                            : card.person.company
+                              ? ` · ${card.person.company}`
+                              : ""}
+                        </p>
+                      </button>
+                      {confirmDeleteId === card.card.id ? (
+                        <div className="flex shrink-0 gap-1">
+                          <button
+                            type="button"
+                            className="text-xs text-destructive hover:underline"
+                            onClick={() => void deleteCard(card)}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            className="text-xs text-muted-foreground hover:underline"
+                            onClick={() => setConfirmDeleteId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => setConfirmDeleteId(card.card.id)}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </article>
                 </li>
               ))}
             </ul>
@@ -378,7 +473,25 @@ export function PipelineBoard({ track }: { track: PipelineBoardTrack }) {
           });
         }}
       />
+      <CloseReasonDialog
+        open={Boolean(rejectCard)}
+        personName={rejectCard ? personDisplayName(rejectCard.person) : ""}
+        onClose={() => setRejectCard(null)}
+        onSubmit={rejectCardWithReason}
+      />
     </div>
+  );
+}
+
+function findPipelineCard(
+  board: AllocationBoardResponse | null,
+  cardId: string,
+): AllocationBoardCard | undefined {
+  if (!board || !cardId) {
+    return undefined;
+  }
+  return ALLOCATION_OPEN_STAGES.flatMap((stage) => board.columns[stage]).find(
+    (item) => item.card.id === cardId,
   );
 }
 
@@ -390,6 +503,11 @@ function AllocationCardView({
   onOpen,
   onToggleMenu,
   onSendAppLink,
+  onReject,
+  confirmDelete,
+  onAskDelete,
+  onCancelDelete,
+  onConfirmDelete,
 }: {
   card: AllocationBoardCard;
   focused: boolean;
@@ -398,6 +516,11 @@ function AllocationCardView({
   onOpen: () => void;
   onToggleMenu: () => void;
   onSendAppLink: () => void;
+  onReject: () => void;
+  confirmDelete: boolean;
+  onAskDelete: () => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: () => void;
 }) {
   const showSend = card.card.stage === "contacted";
 
@@ -424,22 +547,22 @@ function AllocationCardView({
           >
             {personDisplayName(card.person)}
           </button>
-          {showSend ? (
-            <div className="relative">
-              <button
-                type="button"
-                className="px-1 text-muted-foreground"
-                aria-label="Card menu"
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onToggleMenu();
-                }}
-              >
-                ⋯
-              </button>
-              {menuOpen ? (
-                <div className="absolute right-0 z-10 mt-1 w-52 rounded-md border bg-background p-1 shadow">
+          <div className="relative">
+            <button
+              type="button"
+              className="px-1 text-muted-foreground"
+              aria-label="Card menu"
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleMenu();
+              }}
+            >
+              ⋯
+            </button>
+            {menuOpen ? (
+              <div className="absolute right-0 z-10 mt-1 w-52 rounded-md border bg-background p-1 shadow">
+                {showSend ? (
                   <button
                     type="button"
                     className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted"
@@ -450,10 +573,55 @@ function AllocationCardView({
                   >
                     Send app link without call
                   </button>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+                ) : null}
+                <button
+                  type="button"
+                  className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onReject();
+                  }}
+                >
+                  Reject
+                </button>
+                {confirmDelete ? (
+                  <div className="flex gap-1 px-2 py-1">
+                    <button
+                      type="button"
+                      className="text-xs text-destructive hover:underline"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onConfirmDelete();
+                      }}
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:underline"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onCancelDelete();
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onAskDelete();
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </div>
         </div>
         <p className="text-xs text-muted-foreground">
           {card.person.company ?? "No company"}

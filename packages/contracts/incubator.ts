@@ -1,4 +1,9 @@
-import type { BudgetQualified, IncubatorStage, IncubatorTierName } from "./enums";
+import type {
+  BudgetQualified,
+  IncubatorStage,
+  IncubatorTierName,
+  ProgramTrack,
+} from "./enums";
 
 export const INCUBATOR_OPEN_STAGES = ["sent", "applied", "approved"] as const;
 export type IncubatorOpenStage = (typeof INCUBATOR_OPEN_STAGES)[number];
@@ -21,6 +26,22 @@ export function incubatorTierLabel(tier: IncubatorTierName): string {
 
 export function isBudgetQualified(value: BudgetQualified): boolean {
   return value === "light" || value === "heavy";
+}
+
+export function shouldClearIncubatorTrack(
+  programTrack: ProgramTrack | null,
+): boolean {
+  return programTrack === "incubator";
+}
+
+export function describeIncubatorActivity(
+  payload: Record<string, unknown>,
+): string | null {
+  const what = typeof payload.what === "string" ? payload.what : "";
+  if (what === "incubator.card_delete") {
+    return "Deleted incubator card";
+  }
+  return null;
 }
 
 export type IncubatorMoveInput = {

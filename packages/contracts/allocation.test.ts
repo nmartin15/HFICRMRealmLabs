@@ -4,8 +4,10 @@ import {
   canSendAppLinkWithoutCall,
   currentBoardBadge,
   daysInStage,
+  describeAllocationActivity,
   isAllocationClosedStage,
   isAllocationOpenStage,
+  shouldClearPipelineTrack,
   stageEnteredAtIso,
 } from "./allocation";
 
@@ -143,5 +145,24 @@ describe("current board badge", () => {
       stage: "applied",
       href: "/capital-raising",
     });
+  });
+});
+
+describe("pipeline card delete", () => {
+  it("clears the track when the person is still on a pipeline board", () => {
+    expect(shouldClearPipelineTrack("allocation")).toBe(true);
+    expect(shouldClearPipelineTrack("recruitment")).toBe(true);
+    expect(shouldClearPipelineTrack("capital_raising")).toBe(true);
+  });
+
+  it("leaves incubator track alone", () => {
+    expect(shouldClearPipelineTrack("incubator")).toBe(false);
+    expect(shouldClearPipelineTrack(null)).toBe(false);
+  });
+
+  it("labels the delete on the timeline", () => {
+    expect(
+      describeAllocationActivity({ what: "allocation.card_delete" }),
+    ).toBe("Deleted pipeline card");
   });
 });

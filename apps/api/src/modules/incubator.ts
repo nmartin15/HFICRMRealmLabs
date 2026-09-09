@@ -11,6 +11,8 @@ import {
   incubatorCardSchema,
   incubatorStageMoveBodySchema,
   isIncubatorOpenStage,
+  okResponseSchema,
+  shouldClearIncubatorTrack,
   stageEnteredAtIso,
   type IncubatorBoardCard,
 } from "@realm-labs/contracts";
@@ -295,6 +297,62 @@ export const incubatorRoutes: FastifyPluginAsyncZod = async (app) => {
       });
 
       return incubatorCardSchema.parse(serializeIncubatorCard(updated));
+    },
+  );
+
+  app.delete(
+    "/incubator/:id",
+    {
+      schema: {
+        params: incubatorCardIdParamsSchema,
+        response: { 200: okResponseSchema },
+      },
+    },
+    async (req) => {
+      const actor = requireUser(req);
+      const card = await requireIncubatorCard(app.db, req.params.id);
+      const personRows = await app.db
+        .select()
+        .from(people)
+        .where(eq(people.id, card.personId))
+        .limit(1);
+      const person = personRows[0];
+      const clearTrack = shouldClearIncubatorTrack(
+        person?.programTrack ?? null,
+      );
+
+      await app.db
+        .delete(incubatorCards)
+        .where(eq(incubatorCards.id, card.id));
+
+      if (clearTrack && person) {
+        await app.db
+          .update(people)
+          .set({ programTrack: null })
+          .where(eq(people.id, person.id));
+      }
+
+      const when = new Date();
+      await writeActivity(app.db, {
+        personId: card.personId,
+        userId: actor.id,
+        type: "field_change",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "incubator.card_delete",
+          when: when.toISOString(),
+          before: {
+            cardId: card.id,
+            stage: card.stage,
+            programTrack: person?.programTrack ?? null,
+          },
+          after: {
+            programTrack: clearTrack ? null : (person?.programTrack ?? null),
+          },
+        },
+      });
+
+      return { ok: true as const };
     },
   );
 };

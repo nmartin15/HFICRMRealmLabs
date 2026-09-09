@@ -1,5 +1,9 @@
 import type { Activity, User } from "@realm-labs/contracts";
-import { describeTaskActivity } from "@realm-labs/contracts";
+import {
+  describeAllocationActivity,
+  describeIncubatorActivity,
+  describeTaskActivity,
+} from "@realm-labs/contracts";
 
 export function activityActorLabel(
   activity: Activity,
@@ -20,7 +24,10 @@ export function activityActorLabel(
 }
 
 export function activitySummary(activity: Activity): string {
-  const described = describeTaskActivity(activity.payload);
+  const described =
+    describeTaskActivity(activity.payload) ??
+    describeIncubatorActivity(activity.payload) ??
+    describeAllocationActivity(activity.payload);
   if (described) {
     return described;
   }

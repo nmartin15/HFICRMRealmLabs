@@ -39,6 +39,7 @@ export default function IncubatorBoardPage() {
   const [columnIndex, setColumnIndex] = useState(0);
   const [cardIndex, setCardIndex] = useState(0);
   const [menuCardId, setMenuCardId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [noteCard, setNoteCard] = useState<IncubatorBoardCard | null>(null);
   const [closedOpen, setClosedOpen] = useState(false);
   const [applicationRefMove, setApplicationRefMove] =
@@ -184,6 +185,18 @@ export default function IncubatorBoardPage() {
     }
   }
 
+  async function deleteCard(card: IncubatorBoardCard) {
+    setError("");
+    setMenuCardId(null);
+    setConfirmDeleteId(null);
+    try {
+      await api(`/incubator/${card.card.id}`, { method: "DELETE" });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete card");
+    }
+  }
+
   if (!board && !error) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
@@ -266,12 +279,17 @@ export default function IncubatorBoardPage() {
                       setCardIndex(cardIdx);
                     }}
                     onOpen={() => router.push(`/people/${card.person.id}`)}
-                    onToggleMenu={() =>
+                    onToggleMenu={() => {
+                      setConfirmDeleteId(null);
                       setMenuCardId((current) =>
                         current === card.card.id ? null : card.card.id,
-                      )
-                    }
+                      );
+                    }}
                     onReject={() => void requestMove(card, "rejected")}
+                    confirmDelete={confirmDeleteId === card.card.id}
+                    onAskDelete={() => setConfirmDeleteId(card.card.id)}
+                    onCancelDelete={() => setConfirmDeleteId(null)}
+                    onConfirmDelete={() => void deleteCard(card)}
                   />
                 ))}
               </ul>
@@ -309,21 +327,53 @@ export default function IncubatorBoardPage() {
             <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {(board?.closed ?? []).map((card) => (
                 <li key={card.card.id}>
-                  <button
-                    type="button"
-                    className="w-full rounded-lg border bg-card p-2 text-left text-sm"
-                    onClick={() => router.push(`/people/${card.person.id}`)}
-                  >
-                    <p className="font-medium">
-                      {personDisplayName(card.person)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {card.card.closeReason ?? "Rejected"}
-                      {card.card.tier
-                        ? ` · ${incubatorTierLabel(card.card.tier)}`
-                        : ""}
-                    </p>
-                  </button>
+                  <article className="rounded-lg border bg-card p-2 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() =>
+                          router.push(`/people/${card.person.id}`)
+                        }
+                      >
+                        <p className="font-medium">
+                          {personDisplayName(card.person)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {card.card.closeReason ?? "Rejected"}
+                          {card.card.tier
+                            ? ` · ${incubatorTierLabel(card.card.tier)}`
+                            : ""}
+                        </p>
+                      </button>
+                      {confirmDeleteId === card.card.id ? (
+                        <div className="flex shrink-0 gap-1">
+                          <button
+                            type="button"
+                            className="text-xs text-destructive hover:underline"
+                            onClick={() => void deleteCard(card)}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            className="text-xs text-muted-foreground hover:underline"
+                            onClick={() => setConfirmDeleteId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => setConfirmDeleteId(card.card.id)}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </article>
                 </li>
               ))}
             </ul>
@@ -420,6 +470,10 @@ function IncubatorCardView({
   onOpen,
   onToggleMenu,
   onReject,
+  confirmDelete,
+  onAskDelete,
+  onCancelDelete,
+  onConfirmDelete,
 }: {
   card: IncubatorBoardCard;
   focused: boolean;
@@ -428,6 +482,10 @@ function IncubatorCardView({
   onOpen: () => void;
   onToggleMenu: () => void;
   onReject: () => void;
+  confirmDelete: boolean;
+  onAskDelete: () => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: () => void;
 }) {
   return (
     <li>
@@ -477,6 +535,41 @@ function IncubatorCardView({
                 >
                   Reject
                 </button>
+                {confirmDelete ? (
+                  <div className="flex gap-1 px-2 py-1">
+                    <button
+                      type="button"
+                      className="text-xs text-destructive hover:underline"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onConfirmDelete();
+                      }}
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:underline"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onCancelDelete();
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onAskDelete();
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             ) : null}
           </div>

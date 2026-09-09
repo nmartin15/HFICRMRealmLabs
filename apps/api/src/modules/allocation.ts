@@ -16,6 +16,7 @@ import {
   isAllocationOpenStage,
   isOnAllocationBoard,
   okResponseSchema,
+  shouldClearPipelineTrack,
   stageEnteredAtIso,
   type AllocationBoardCard,
   type AllocationOpenStage,
@@ -332,6 +333,60 @@ export const allocationRoutes: FastifyPluginAsyncZod = async (app) => {
         { decision: "route_incubator" },
         { noCallAppLink: true },
       );
+      return { ok: true as const };
+    },
+  );
+
+  app.delete(
+    "/allocation/:id",
+    {
+      schema: {
+        params: allocationCardIdParamsSchema,
+        response: { 200: okResponseSchema },
+      },
+    },
+    async (req) => {
+      const actor = requireUser(req);
+      const card = await requireAllocationCard(app.db, req.params.id);
+      const personRows = await app.db
+        .select()
+        .from(people)
+        .where(eq(people.id, card.personId))
+        .limit(1);
+      const person = personRows[0];
+      const clearTrack = shouldClearPipelineTrack(person?.programTrack ?? null);
+
+      await app.db
+        .delete(allocationCards)
+        .where(eq(allocationCards.id, card.id));
+
+      if (clearTrack && person) {
+        await app.db
+          .update(people)
+          .set({ programTrack: null })
+          .where(eq(people.id, person.id));
+      }
+
+      const when = new Date();
+      await writeActivity(app.db, {
+        personId: card.personId,
+        userId: actor.id,
+        type: "field_change",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "allocation.card_delete",
+          when: when.toISOString(),
+          before: {
+            cardId: card.id,
+            stage: card.stage,
+            programTrack: person?.programTrack ?? null,
+          },
+          after: {
+            programTrack: clearTrack ? null : (person?.programTrack ?? null),
+          },
+        },
+      });
+
       return { ok: true as const };
     },
   );
