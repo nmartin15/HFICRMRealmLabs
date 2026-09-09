@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   CALENDAR_SYNC_QUEUE,
   GMAIL_SYNC_QUEUE,
+  isConfiguredMailbox,
 } from "@realm-labs/contracts";
 import { createDb, mailboxConnections } from "@realm-labs/db";
 import { loadEnv } from "./env.js";
@@ -73,6 +74,9 @@ console.log(`Worker health listening on ${healthPort}`);
 
 const connections = await db.select().from(mailboxConnections);
 for (const row of connections) {
+  if (!isConfiguredMailbox(row.mailbox)) {
+    continue;
+  }
   await scheduleMailboxSync(queues, row.mailbox);
   console.log(`Scheduled sync for ${row.mailbox} mailbox`);
 }

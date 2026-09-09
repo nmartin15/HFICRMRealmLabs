@@ -27,14 +27,12 @@ export async function scheduleMailboxSync(
     },
   );
 
-  if (mailbox === "personal") {
-    await queues.calendar.add(
-      "sync",
-      { mailbox: "personal" as const },
-      {
-        repeat: { every: SYNC_INTERVAL_MS },
-        jobId: "calendar-personal",
-      },
-    );
-  }
+  await queues.calendar.add(
+    "sync",
+    { mailbox },
+    {
+      repeat: { every: SYNC_INTERVAL_MS },
+      jobId: `calendar-${mailbox}`,
+    },
+  );
 }

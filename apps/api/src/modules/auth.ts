@@ -16,8 +16,15 @@ import { googleConfigured } from "../env.js";
 import {
   exchangeGoogleCode,
   googleLoginUrl,
+  mailboxOauthErrorRedirect,
+  mailboxOauthSuccessRedirect,
   oauthErrorRedirect,
 } from "../lib/google.js";
+import {
+  MAILBOX_OAUTH_COOKIE,
+  completeMailboxOAuth,
+  decodeMailboxState,
+} from "../lib/mailbox-oauth.js";
 import { serializeUser } from "../lib/serialize.js";
 import { clearSessionCookie, setSessionCookie } from "../plugins/auth.js";
 import { requireUser } from "../plugins/db.js";
@@ -94,6 +101,42 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
           query.error ?? "Missing authorization code",
         ),
       );
+    }
+
+    const mailboxState = req.cookies[MAILBOX_OAUTH_COOKIE];
+    if (mailboxState && query.state && mailboxState === query.state) {
+      const mailbox = decodeMailboxState(query.state);
+      reply.clearCookie(MAILBOX_OAUTH_COOKIE, { path: "/" });
+      if (!mailbox) {
+        return reply.redirect(
+          mailboxOauthErrorRedirect(
+            app.env.WEB_ORIGIN,
+            "OAUTH_ERROR",
+            "Invalid OAuth state",
+          ),
+        );
+      }
+      const result = await completeMailboxOAuth({
+        db: app.db,
+        env: app.env,
+        queues: app.queues,
+        actor: req.user,
+        mailbox,
+        code: query.code,
+        onEnqueueError: (err) => {
+          req.log.error({ err }, "failed to enqueue mailbox sync");
+        },
+      });
+      if (!result.ok) {
+        return reply.redirect(
+          mailboxOauthErrorRedirect(
+            app.env.WEB_ORIGIN,
+            result.code,
+            result.message,
+          ),
+        );
+      }
+      return reply.redirect(mailboxOauthSuccessRedirect(app.env.WEB_ORIGIN));
     }
 
     const expectedState = req.cookies.rl_oauth_state;

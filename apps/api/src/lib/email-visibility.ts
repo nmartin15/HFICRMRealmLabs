@@ -1,64 +1,76 @@
 import {
-  PERSONAL_MAILBOX_EMAIL,
+  ALL_MAILBOXES,
   canViewEmailThread,
+  mailboxEmailFor,
   type Mailbox,
 } from "@realm-labs/contracts";
 import { eq, or, type SQL } from "drizzle-orm";
 import { emailThreads, mailboxConnections, type Database } from "@realm-labs/db";
 
-export type PersonalMailboxOwner = {
+export type MailboxOwner = {
+  mailbox: Mailbox;
   email: string;
   connectedBy: string;
 };
 
-export async function loadPersonalMailboxOwner(
+export async function loadMailboxOwners(
   db: Database,
-): Promise<PersonalMailboxOwner | null> {
-  const rows = await db
+): Promise<MailboxOwner[]> {
+  return db
     .select({
+      mailbox: mailboxConnections.mailbox,
       email: mailboxConnections.email,
       connectedBy: mailboxConnections.connectedBy,
     })
-    .from(mailboxConnections)
-    .where(eq(mailboxConnections.mailbox, "personal"))
-    .limit(1);
-  return rows[0] ?? null;
+    .from(mailboxConnections);
+}
+
+function ownerFor(
+  owners: readonly MailboxOwner[],
+  mailbox: Mailbox,
+): MailboxOwner | undefined {
+  return owners.find((row) => row.mailbox === mailbox);
+}
+
+function mailboxEmail(
+  owners: readonly MailboxOwner[],
+  mailbox: Mailbox,
+): string {
+  return ownerFor(owners, mailbox)?.email ?? mailboxEmailFor(mailbox);
 }
 
 export function emailThreadsVisibleSql(
   viewer: { id: string; email: string },
-  owner: PersonalMailboxOwner | null,
+  owners: readonly MailboxOwner[],
 ): SQL | undefined {
-  if (
+  const owned = ALL_MAILBOXES.filter((mailbox) =>
     canViewEmailThread({
-      mailbox: "personal",
+      mailbox,
       sharedVisible: false,
       viewerEmail: viewer.email,
-      viewerId: viewer.id,
-      personalMailboxEmail: owner?.email ?? PERSONAL_MAILBOX_EMAIL,
-      personalMailboxConnectedBy: owner?.connectedBy,
-    })
-  ) {
+      mailboxEmail: mailboxEmail(owners, mailbox),
+    }),
+  );
+
+  if (owned.length === ALL_MAILBOXES.length) {
     return undefined;
   }
 
   return or(
-    eq(emailThreads.mailbox, "shared"),
     eq(emailThreads.sharedVisible, true),
+    ...owned.map((mailbox) => eq(emailThreads.mailbox, mailbox)),
   );
 }
 
 export function emailThreadRowVisible(
   row: { mailbox: Mailbox; sharedVisible: boolean },
   viewer: { id: string; email: string },
-  owner: PersonalMailboxOwner | null,
+  owners: readonly MailboxOwner[],
 ): boolean {
   return canViewEmailThread({
     mailbox: row.mailbox,
     sharedVisible: row.sharedVisible,
     viewerEmail: viewer.email,
-    viewerId: viewer.id,
-    personalMailboxEmail: owner?.email ?? PERSONAL_MAILBOX_EMAIL,
-    personalMailboxConnectedBy: owner?.connectedBy,
+    mailboxEmail: mailboxEmail(owners, row.mailbox),
   });
 }

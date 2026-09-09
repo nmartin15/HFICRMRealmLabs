@@ -1,8 +1,18 @@
 import { z } from "zod";
-import { emailSchema, isoDateTimeSchema, mailboxSchema } from "./enums";
+import {
+  emailSchema,
+  isoDateTimeSchema,
+  mailboxSchema,
+  type Mailbox,
+} from "./enums";
 
 export const PERSONAL_MAILBOX_EMAIL = "nathan@realmlabs.co";
-export const SHARED_MAILBOX_EMAIL = "application@realmlabs.co";
+export const PARTNER_MAILBOX_EMAIL = "stefano@realmlabs.co";
+
+export const MAILBOX_ADDRESSES: Record<Mailbox, string> = {
+  personal: PERSONAL_MAILBOX_EMAIL,
+  partner: PARTNER_MAILBOX_EMAIL,
+};
 
 export const GMAIL_SYNC_QUEUE = "gmail.sync";
 export const CALENDAR_SYNC_QUEUE = "calendar.sync";
@@ -20,25 +30,32 @@ export const configuredMailboxSchema = z.object({
 });
 export type ConfiguredMailbox = z.infer<typeof configuredMailboxSchema>;
 
+/** Operator mailboxes shown in Settings and allowed to Connect. */
 export const CONFIGURED_MAILBOXES: readonly ConfiguredMailbox[] = [
   {
     email: PERSONAL_MAILBOX_EMAIL,
     mailbox: "personal",
-    label: "Personal",
+    label: "Nathan",
   },
   {
-    email: SHARED_MAILBOX_EMAIL,
-    mailbox: "shared",
-    label: "Shared applications",
+    email: PARTNER_MAILBOX_EMAIL,
+    mailbox: "partner",
+    label: "Stefano",
   },
 ];
 
-export function mailboxEmailFor(mailbox: "personal" | "shared"): string {
-  const row = CONFIGURED_MAILBOXES.find((item) => item.mailbox === mailbox);
-  if (!row) {
-    throw new Error(`Unknown mailbox: ${mailbox}`);
-  }
-  return row.email;
+export const ALL_MAILBOXES: readonly Mailbox[] = ["personal", "partner"];
+
+export function isConfiguredMailbox(mailbox: Mailbox): boolean {
+  return CONFIGURED_MAILBOXES.some((item) => item.mailbox === mailbox);
+}
+
+export function isMailbox(value: string): value is Mailbox {
+  return mailboxSchema.safeParse(value).success;
+}
+
+export function mailboxEmailFor(mailbox: Mailbox): string {
+  return MAILBOX_ADDRESSES[mailbox];
 }
 
 export const mailboxConnectionSchema = configuredMailboxSchema.extend({
@@ -67,6 +84,6 @@ export const gmailSyncJobDataSchema = z.object({
 export type GmailSyncJobData = z.infer<typeof gmailSyncJobDataSchema>;
 
 export const calendarSyncJobDataSchema = z.object({
-  mailbox: z.literal("personal"),
+  mailbox: mailboxSchema,
 });
 export type CalendarSyncJobData = z.infer<typeof calendarSyncJobDataSchema>;

@@ -1,4 +1,4 @@
-import { CONFIGURED_MAILBOXES } from "./mailboxes";
+import { MAILBOX_ADDRESSES } from "./mailboxes";
 import { normalizeEmail } from "./hosted-domain";
 import type { EmailMessageDirection } from "./email-messages";
 
@@ -7,9 +7,9 @@ export const EMAIL_SNIPPET_MAX_CHARS = 300;
 const ADDRESS_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 
 export function mailboxEmails(
-  configured = CONFIGURED_MAILBOXES,
+  addresses: readonly string[] = Object.values(MAILBOX_ADDRESSES),
 ): readonly string[] {
-  return configured.map((item) => normalizeEmail(item.email));
+  return addresses.map((email) => normalizeEmail(email));
 }
 
 /** Lowercase and strip plus-tagging from the local part (`jane+jobs@x.com` → `jane@x.com`). */

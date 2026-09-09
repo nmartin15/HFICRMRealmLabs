@@ -1,14 +1,12 @@
 import type { Mailbox, UserRole } from "./enums";
-import { PERSONAL_MAILBOX_EMAIL } from "./mailboxes";
+import { mailboxEmailFor } from "./mailboxes";
 import { normalizeEmail } from "./hosted-domain";
 
 export type EmailThreadVisibilityInput = {
   mailbox: Mailbox;
   sharedVisible: boolean;
   viewerEmail: string;
-  viewerId?: string;
-  personalMailboxEmail?: string;
-  personalMailboxConnectedBy?: string;
+  mailboxEmail?: string;
 };
 
 /**
@@ -32,30 +30,16 @@ export function canViewActivity(): boolean {
 }
 
 /**
- * Shared mailbox threads are visible to everyone.
- * Personal mailbox threads are visible only to the mailbox owner unless
- * shared_visible is true.
- *
- * Owner is the connected personal mailbox row: matching Google email, or
- * the user who connected it. Falls back to the personal mailbox constant
- * when no connection row is supplied.
+ * Operator mailbox threads are visible only to that operator unless
+ * shared_visible is true. Owner is the configured mailbox address
+ * (or the connected Google email when supplied).
  */
 export function canViewEmailThread(input: EmailThreadVisibilityInput): boolean {
-  if (input.mailbox === "shared") {
-    return true;
-  }
   if (input.sharedVisible) {
     return true;
   }
-  if (
-    input.viewerId &&
-    input.personalMailboxConnectedBy &&
-    input.viewerId === input.personalMailboxConnectedBy
-  ) {
-    return true;
-  }
   const ownerEmail = normalizeEmail(
-    input.personalMailboxEmail ?? PERSONAL_MAILBOX_EMAIL,
+    input.mailboxEmail ?? mailboxEmailFor(input.mailbox),
   );
   return normalizeEmail(input.viewerEmail) === ownerEmail;
 }
@@ -68,8 +52,17 @@ export function canChangeUserRole(role: UserRole): boolean {
   return role === "admin";
 }
 
-export function canConnectMailbox(role: UserRole): boolean {
-  return role === "admin";
+export function canConnectMailbox(input: {
+  role: UserRole;
+  actorEmail: string;
+  mailboxEmail: string;
+}): boolean {
+  if (input.role === "admin") {
+    return true;
+  }
+  return (
+    normalizeEmail(input.actorEmail) === normalizeEmail(input.mailboxEmail)
+  );
 }
 
 /** Do Not Contact people are omitted from lists and exports. The record page still loads. */

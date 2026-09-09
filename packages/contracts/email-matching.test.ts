@@ -9,16 +9,24 @@ import {
   htmlToPlainText,
   isInboundFromPerson,
   isInboundReply,
+  mailboxEmails,
   matchPersonFromParticipants,
   parseEmailAddresses,
 } from "./email-matching";
-import { PERSONAL_MAILBOX_EMAIL, SHARED_MAILBOX_EMAIL } from "./mailboxes";
+import { PARTNER_MAILBOX_EMAIL, PERSONAL_MAILBOX_EMAIL } from "./mailboxes";
 
 const jane = { id: "11111111-1111-4111-8111-111111111111", email: "jane@example.com" };
 const alex = { id: "22222222-2222-4222-8222-222222222222", email: "alex@example.com" };
-const mailboxes = [PERSONAL_MAILBOX_EMAIL, SHARED_MAILBOX_EMAIL];
+const mailboxes = [PERSONAL_MAILBOX_EMAIL, PARTNER_MAILBOX_EMAIL];
 
 describe("email matching", () => {
+  it("treats both operator addresses as mailbox addresses", () => {
+    expect(mailboxEmails()).toEqual([
+      PERSONAL_MAILBOX_EMAIL,
+      PARTNER_MAILBOX_EMAIL,
+    ]);
+  });
+
   it("matches case-insensitively", () => {
     expect(emailsMatch("Jane@Example.COM", "jane@example.com")).toBe(true);
     expect(canonicalEmail("  Jane@Example.COM ")).toBe("jane@example.com");
@@ -55,7 +63,7 @@ describe("email matching", () => {
 
   it("matches the first person among multiple participants and skips mailbox addresses", () => {
     const participants = [
-      SHARED_MAILBOX_EMAIL,
+      PARTNER_MAILBOX_EMAIL,
       "unknown@other.com",
       "ALEX@example.com",
       "jane@example.com",
@@ -68,7 +76,7 @@ describe("email matching", () => {
   it("returns null when no person matches", () => {
     expect(
       matchPersonFromParticipants(
-        [SHARED_MAILBOX_EMAIL, "stranger@example.com"],
+        [PARTNER_MAILBOX_EMAIL, "stranger@example.com"],
         [jane],
         mailboxes,
       ),

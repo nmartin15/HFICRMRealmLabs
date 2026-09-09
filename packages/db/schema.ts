@@ -98,7 +98,7 @@ export const meetingOutcomeEnum = pgEnum("meeting_outcome", [
   "no_show",
   "rescheduled",
 ]);
-export const mailboxEnum = pgEnum("mailbox", ["personal", "shared"]);
+export const mailboxEnum = pgEnum("mailbox", ["personal", "partner"]);
 export const activityTypeEnum = pgEnum("activity_type", [
   "note",
   "stage_change",

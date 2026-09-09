@@ -1,48 +1,48 @@
 import {
   CONFIGURED_MAILBOXES,
   canConnectMailbox,
+  isConfiguredMailbox,
   googleCallbackQuerySchema,
   googleStartResponseSchema,
-  isHostedDomainClaim,
-  isHostedDomainEmail,
   mailboxConnectionListResponseSchema,
   mailboxEmailFor,
   mailboxParamsSchema,
-  normalizeEmail,
   okResponseSchema,
   type Mailbox,
   type MailboxConnection,
 } from "@realm-labs/contracts";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
-import { encryptSecret, mailboxConnections } from "@realm-labs/db";
+import { mailboxConnections } from "@realm-labs/db";
 import { eq } from "drizzle-orm";
 import { googleConfigured } from "../env.js";
 import {
-  exchangeGoogleMailboxCode,
   googleMailboxUrl,
   mailboxOauthErrorRedirect,
   mailboxOauthSuccessRedirect,
 } from "../lib/google.js";
-import { enqueueMailboxSync, removeMailboxSync } from "../lib/queues.js";
-import { requireAdmin, requireUser } from "../plugins/db.js";
+import {
+  MAILBOX_OAUTH_COOKIE,
+  completeMailboxOAuth,
+  decodeMailboxState,
+  encodeMailboxState,
+} from "../lib/mailbox-oauth.js";
+import { removeMailboxSync } from "../lib/queues.js";
+import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
 
-const MAILBOX_OAUTH_COOKIE = "rl_mailbox_oauth_state";
-
-function randomState(): string {
-  return Buffer.from(`${Date.now()}:${Math.random()}`).toString("base64url");
-}
-
-function encodeMailboxState(mailbox: Mailbox): string {
-  return `${mailbox}.${randomState()}`;
-}
-
-function decodeMailboxState(state: string): Mailbox | null {
-  const mailbox = state.split(".")[0];
-  if (mailbox === "personal" || mailbox === "shared") {
-    return mailbox;
+function assertCanManageMailbox(
+  actor: { role: "admin" | "member"; email: string },
+  mailbox: Mailbox,
+): void {
+  if (
+    !canConnectMailbox({
+      role: actor.role,
+      actorEmail: actor.email,
+      mailboxEmail: mailboxEmailFor(mailbox),
+    })
+  ) {
+    throw httpError(403, "FORBIDDEN", "You cannot manage this mailbox");
   }
-  return null;
 }
 
 function serializeConnection(
@@ -93,10 +93,11 @@ export const mailboxRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (req, reply) => {
-      const actor = requireAdmin(req);
-      if (!canConnectMailbox(actor.role)) {
-        throw httpError(403, "FORBIDDEN", "Only admin can connect mailboxes");
+      if (!isConfiguredMailbox(req.params.mailbox)) {
+        throw httpError(404, "NOT_FOUND", "Mailbox is not in use");
       }
+      const actor = requireUser(req);
+      assertCanManageMailbox(actor, req.params.mailbox);
       if (!googleConfigured(app.env)) {
         throw httpError(
           503,
@@ -127,12 +128,12 @@ export const mailboxRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (req, reply) => {
       const actor = req.user;
-      if (!actor || !canConnectMailbox(actor.role)) {
+      if (!actor) {
         return reply.redirect(
           mailboxOauthErrorRedirect(
             app.env.WEB_ORIGIN,
             "FORBIDDEN",
-            "Only admin can connect mailboxes",
+            "You cannot connect this mailbox",
           ),
         );
       }
@@ -181,95 +182,27 @@ export const mailboxRoutes: FastifyPluginAsyncZod = async (app) => {
         );
       }
 
-      try {
-        const grant = await exchangeGoogleMailboxCode(app.env, query.code);
-        const email = normalizeEmail(grant.email);
-        const expectedEmail = mailboxEmailFor(mailbox);
-
-        if (!email || !grant.id) {
-          return reply.redirect(
-            mailboxOauthErrorRedirect(
-              app.env.WEB_ORIGIN,
-              "OAUTH_ERROR",
-              "Google account has no email",
-            ),
-          );
-        }
-
-        if (
-          !isHostedDomainEmail(email, app.env.ALLOWED_HOSTED_DOMAIN) ||
-          !isHostedDomainClaim(grant.hd, app.env.ALLOWED_HOSTED_DOMAIN)
-        ) {
-          return reply.redirect(
-            mailboxOauthErrorRedirect(
-              app.env.WEB_ORIGIN,
-              "DOMAIN_NOT_ALLOWED",
-              `Mailbox connect is restricted to ${app.env.ALLOWED_HOSTED_DOMAIN} accounts`,
-            ),
-          );
-        }
-
-        if (email !== expectedEmail) {
-          return reply.redirect(
-            mailboxOauthErrorRedirect(
-              app.env.WEB_ORIGIN,
-              "MAILBOX_MISMATCH",
-              `Sign in as ${expectedEmail} to connect the ${mailbox} mailbox`,
-            ),
-          );
-        }
-
-        const encrypted = encryptSecret(
-          grant.refreshToken,
-          app.env.TOKEN_ENCRYPTION_KEY,
-        );
-        const now = new Date();
-
-        const existing = await app.db
-          .select({ id: mailboxConnections.id })
-          .from(mailboxConnections)
-          .where(eq(mailboxConnections.mailbox, mailbox))
-          .limit(1);
-
-        if (existing[0]) {
-          await app.db
-            .update(mailboxConnections)
-            .set({
-              email,
-              connectedBy: actor.id,
-              refreshTokenEncrypted: encrypted,
-              googleSub: grant.id,
-              gmailHistoryId: null,
-              lastError: null,
-              connectedAt: now,
-            })
-            .where(eq(mailboxConnections.mailbox, mailbox));
-        } else {
-          await app.db.insert(mailboxConnections).values({
-            mailbox,
-            email,
-            connectedBy: actor.id,
-            refreshTokenEncrypted: encrypted,
-            googleSub: grant.id,
-            lastError: null,
-            connectedAt: now,
-          });
-        }
-
-        try {
-          await enqueueMailboxSync(app.queues, mailbox);
-        } catch (err) {
+      const result = await completeMailboxOAuth({
+        db: app.db,
+        env: app.env,
+        queues: app.queues,
+        actor,
+        mailbox,
+        code: query.code,
+        onEnqueueError: (err) => {
           req.log.error({ err }, "failed to enqueue mailbox sync");
-        }
-
-        return reply.redirect(mailboxOauthSuccessRedirect(app.env.WEB_ORIGIN));
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Mailbox connect failed";
+        },
+      });
+      if (!result.ok) {
         return reply.redirect(
-          mailboxOauthErrorRedirect(app.env.WEB_ORIGIN, "OAUTH_ERROR", message),
+          mailboxOauthErrorRedirect(
+            app.env.WEB_ORIGIN,
+            result.code,
+            result.message,
+          ),
         );
       }
+      return reply.redirect(mailboxOauthSuccessRedirect(app.env.WEB_ORIGIN));
     },
   );
 
@@ -282,10 +215,11 @@ export const mailboxRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (req) => {
-      const actor = requireAdmin(req);
-      if (!canConnectMailbox(actor.role)) {
-        throw httpError(403, "FORBIDDEN", "Only admin can disconnect mailboxes");
+      if (!isConfiguredMailbox(req.params.mailbox)) {
+        throw httpError(404, "NOT_FOUND", "Mailbox is not in use");
       }
+      const actor = requireUser(req);
+      assertCanManageMailbox(actor, req.params.mailbox);
 
       await app.db
         .delete(mailboxConnections)

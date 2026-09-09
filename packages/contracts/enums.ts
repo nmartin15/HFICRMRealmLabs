@@ -87,7 +87,7 @@ export const meetingOutcomeSchema = z.enum([
 ]);
 export type MeetingOutcome = z.infer<typeof meetingOutcomeSchema>;
 
-export const mailboxSchema = z.enum(["personal", "shared"]);
+export const mailboxSchema = z.enum(["personal", "partner"]);
 export type Mailbox = z.infer<typeof mailboxSchema>;
 
 export const activityTypeSchema = z.enum([

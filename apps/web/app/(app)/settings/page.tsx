@@ -12,6 +12,7 @@ import type {
   UserListResponse,
   UserRole,
 } from "@realm-labs/contracts";
+import { canConnectMailbox } from "@realm-labs/contracts";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useListNavigation } from "@/hooks/use-list-navigation";
@@ -191,6 +192,10 @@ function SettingsForm() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Connected mailboxes</h2>
+        <p className="text-xs text-muted-foreground">
+          Connect Nathan's Gmail and Calendar. Mail stays private unless
+          marked visible.
+        </p>
         <ul className="divide-y rounded-lg border">
           {mailboxes.map((mailbox) => (
             <li
@@ -216,7 +221,12 @@ function SettingsForm() {
                   <p className="text-xs text-destructive">{mailbox.lastError}</p>
                 ) : null}
               </div>
-              {isAdmin ? (
+              {user &&
+              canConnectMailbox({
+                role: user.role,
+                actorEmail: user.email,
+                mailboxEmail: mailbox.email,
+              }) ? (
                 mailbox.connected ? (
                   <Button
                     type="button"

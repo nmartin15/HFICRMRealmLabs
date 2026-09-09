@@ -6,6 +6,7 @@ import {
   extractGmailPlainText,
   gmailSyncJobDataSchema,
   isInboundReply,
+  isConfiguredMailbox,
   mailboxEmails,
   matchPersonFromParticipants,
   parseEmailAddresses,
@@ -200,7 +201,6 @@ async function upsertGmailThread(
         lastMessageAt: input.lastMessageAt,
         snippet: input.snippet,
         participantEmails: input.participantEmails,
-        sharedVisible: input.mailbox === "shared",
       })
       .where(eq(emailThreads.id, existing.id));
     threadId = existing.id;
@@ -215,7 +215,7 @@ async function upsertGmailThread(
         lastMessageAt: input.lastMessageAt,
         snippet: input.snippet,
         participantEmails: input.participantEmails,
-        sharedVisible: input.mailbox === "shared",
+        sharedVisible: false,
       })
       .returning({ id: emailThreads.id });
     const row = inserted[0];
@@ -415,6 +415,9 @@ export async function runGmailSync(
   rawData: unknown,
 ): Promise<void> {
   const { mailbox } = gmailSyncJobDataSchema.parse(rawData);
+  if (!isConfiguredMailbox(mailbox)) {
+    return;
+  }
   const connectionRows = await db
     .select()
     .from(mailboxConnections)
@@ -665,6 +668,9 @@ export async function runCalendarSync(
   rawData: unknown,
 ): Promise<void> {
   const { mailbox } = calendarSyncJobDataSchema.parse(rawData);
+  if (!isConfiguredMailbox(mailbox)) {
+    return;
+  }
   const connectionRows = await db
     .select()
     .from(mailboxConnections)

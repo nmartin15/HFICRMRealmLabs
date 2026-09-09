@@ -11,7 +11,7 @@ import { writeActivity } from "../lib/activity.js";
 import {
   emailThreadRowVisible,
   emailThreadsVisibleSql,
-  loadPersonalMailboxOwner,
+  loadMailboxOwners,
 } from "../lib/email-visibility.js";
 import { serializeEmailThread } from "../lib/serialize.js";
 import { requireUser } from "../plugins/db.js";
@@ -27,8 +27,8 @@ export const emailThreadRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (req) => {
       const user = requireUser(req);
-      const owner = await loadPersonalMailboxOwner(app.db);
-      const visibility = emailThreadsVisibleSql(user, owner) ?? sql`true`;
+      const owners = await loadMailboxOwners(app.db);
+      const visibility = emailThreadsVisibleSql(user, owners) ?? sql`true`;
 
       const rows = await app.db
         .select({ thread: emailThreads, person: people })
@@ -44,7 +44,7 @@ export const emailThreadRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const visible = rows
         .map((row) => row.thread)
-        .filter((row) => emailThreadRowVisible(row, user, owner));
+        .filter((row) => emailThreadRowVisible(row, user, owners));
 
       return {
         data: visible.map((row) =>
@@ -62,22 +62,19 @@ export const emailThreadRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (req) => {
-      requireUser(req);
+      const user = requireUser(req);
+      const owners = await loadMailboxOwners(app.db);
+      const visibility = emailThreadsVisibleSql(user, owners) ?? sql`true`;
       const rows = await app.db
         .select()
         .from(emailThreads)
-        .where(
-          and(
-            eq(emailThreads.mailbox, "shared"),
-            isNull(emailThreads.personId),
-          ),
-        )
+        .where(and(visibility, isNull(emailThreads.personId)))
         .orderBy(desc(emailThreads.lastMessageAt));
 
       return {
-        data: rows.map((row) =>
-          emailThreadSchema.parse(serializeEmailThread(row)),
-        ),
+        data: rows
+          .filter((row) => emailThreadRowVisible(row, user, owners))
+          .map((row) => emailThreadSchema.parse(serializeEmailThread(row))),
       };
     },
   );
@@ -93,6 +90,7 @@ export const emailThreadRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (req) => {
       const actor = requireUser(req);
+      const owners = await loadMailboxOwners(app.db);
       const threadRows = await app.db
         .select()
         .from(emailThreads)
@@ -102,12 +100,8 @@ export const emailThreadRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!thread) {
         throw httpError(404, "NOT_FOUND", "Email thread not found");
       }
-      if (thread.mailbox !== "shared") {
-        throw httpError(
-          400,
-          "INVALID_THREAD",
-          "Only shared mailbox threads can be linked from Unmatched",
-        );
+      if (!emailThreadRowVisible(thread, actor, owners)) {
+        throw httpError(404, "NOT_FOUND", "Email thread not found");
       }
       if (thread.personId) {
         throw httpError(400, "ALREADY_LINKED", "Thread is already linked");

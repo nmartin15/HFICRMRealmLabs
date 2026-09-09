@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { googleAuthErrorMessage } from "./google.js";
+import { googleAuthErrorMessage, googleMailboxRedirectUri } from "./google.js";
 
 describe("googleAuthErrorMessage", () => {
   it("explains invalid_client as a secret mismatch", () => {
@@ -23,5 +23,14 @@ describe("googleAuthErrorMessage", () => {
         },
       }),
     ).toBe("Bad Request");
+  });
+
+  it("sends mailbox OAuth through the login redirect URI", () => {
+    expect(
+      googleMailboxRedirectUri({
+        GOOGLE_REDIRECT_URI:
+          "http://localhost:3000/api/proxy/auth/google/callback",
+      }),
+    ).toBe("http://localhost:3000/api/proxy/auth/google/callback");
   });
 });

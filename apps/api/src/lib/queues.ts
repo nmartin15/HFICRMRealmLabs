@@ -49,25 +49,23 @@ export async function enqueueMailboxSync(
     },
   );
 
-  if (mailbox === "personal") {
-    await queues.calendar.add(
-      "sync",
-      { mailbox: "personal" as const },
-      {
-        jobId: `calendar-personal-once-${Date.now()}`,
-        removeOnComplete: 50,
-        removeOnFail: 50,
-      },
-    );
-    await queues.calendar.add(
-      "sync",
-      { mailbox: "personal" as const },
-      {
-        repeat: { every: SYNC_INTERVAL_MS },
-        jobId: "calendar-personal",
-      },
-    );
-  }
+  await queues.calendar.add(
+    "sync",
+    { mailbox },
+    {
+      jobId: `calendar-${mailbox}-once-${Date.now()}`,
+      removeOnComplete: 50,
+      removeOnFail: 50,
+    },
+  );
+  await queues.calendar.add(
+    "sync",
+    { mailbox },
+    {
+      repeat: { every: SYNC_INTERVAL_MS },
+      jobId: `calendar-${mailbox}`,
+    },
+  );
 }
 
 export async function removeMailboxSync(
@@ -78,10 +76,8 @@ export async function removeMailboxSync(
     every: SYNC_INTERVAL_MS,
     jobId: `gmail-${mailbox}`,
   });
-  if (mailbox === "personal") {
-    await queues.calendar.removeRepeatable("sync", {
-      every: SYNC_INTERVAL_MS,
-      jobId: "calendar-personal",
-    });
-  }
+  await queues.calendar.removeRepeatable("sync", {
+    every: SYNC_INTERVAL_MS,
+    jobId: `calendar-${mailbox}`,
+  });
 }

@@ -82,7 +82,7 @@ export default function UnmatchedInboxPage() {
       <div>
         <h1 className="text-xl font-medium tracking-tight">Unmatched inbox</h1>
         <p className="text-sm text-muted-foreground">
-          Shared mailbox threads with no person match. j/k to move, enter to
+          Threads from your mailbox with no person match. j/k to move, enter to
           link the selected person.
         </p>
       </div>

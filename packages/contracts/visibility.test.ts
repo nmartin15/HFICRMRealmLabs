@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { PERSONAL_MAILBOX_EMAIL } from "./mailboxes";
+import {
+  PARTNER_MAILBOX_EMAIL,
+  PERSONAL_MAILBOX_EMAIL,
+} from "./mailboxes";
 import {
   canChangeUserRole,
   canConnectMailbox,
@@ -13,6 +16,7 @@ import {
 } from "./visibility";
 
 const owner = PERSONAL_MAILBOX_EMAIL;
+const partner = PARTNER_MAILBOX_EMAIL;
 const teammate = "teammate@realmlabs.co";
 
 describe("team-wide visibility", () => {
@@ -25,14 +29,21 @@ describe("team-wide visibility", () => {
 });
 
 describe("email thread visibility", () => {
-  it("shows shared mailbox threads to everyone", () => {
+  it("hides partner threads from the other operator", () => {
     expect(
       canViewEmailThread({
-        mailbox: "shared",
+        mailbox: "partner",
         sharedVisible: false,
-        viewerEmail: teammate,
+        viewerEmail: owner,
       }),
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      canViewEmailThread({
+        mailbox: "personal",
+        sharedVisible: false,
+        viewerEmail: partner,
+      }),
+    ).toBe(false);
   });
 
   it("hides personal threads from non-owners", () => {
@@ -55,12 +66,29 @@ describe("email thread visibility", () => {
     ).toBe(true);
   });
 
-  it("shows personal threads to everyone when shared_visible is true", () => {
+  it("shows partner threads to Stefano", () => {
+    expect(
+      canViewEmailThread({
+        mailbox: "partner",
+        sharedVisible: false,
+        viewerEmail: partner,
+      }),
+    ).toBe(true);
+  });
+
+  it("shows operator threads to everyone when shared_visible is true", () => {
     expect(
       canViewEmailThread({
         mailbox: "personal",
         sharedVisible: true,
         viewerEmail: teammate,
+      }),
+    ).toBe(true);
+    expect(
+      canViewEmailThread({
+        mailbox: "partner",
+        sharedVisible: true,
+        viewerEmail: owner,
       }),
     ).toBe(true);
   });
@@ -75,26 +103,21 @@ describe("email thread visibility", () => {
     ).toBe(true);
   });
 
-  it("treats the connected mailbox user as owner", () => {
-    const connectorId = "11111111-1111-4111-8111-111111111111";
+  it("uses the connected mailbox email when supplied", () => {
     expect(
       canViewEmailThread({
-        mailbox: "personal",
+        mailbox: "partner",
         sharedVisible: false,
-        viewerEmail: teammate,
-        viewerId: connectorId,
-        personalMailboxEmail: "personal@realmlabs.co",
-        personalMailboxConnectedBy: connectorId,
+        viewerEmail: partner,
+        mailboxEmail: "stefano@realmlabs.co",
       }),
     ).toBe(true);
     expect(
       canViewEmailThread({
-        mailbox: "personal",
+        mailbox: "partner",
         sharedVisible: false,
-        viewerEmail: teammate,
-        viewerId: "22222222-2222-4222-8222-222222222222",
-        personalMailboxEmail: "personal@realmlabs.co",
-        personalMailboxConnectedBy: connectorId,
+        viewerEmail: owner,
+        mailboxEmail: "stefano@realmlabs.co",
       }),
     ).toBe(false);
   });
@@ -111,9 +134,31 @@ describe("admin-only mutations", () => {
     expect(canChangeUserRole("member")).toBe(false);
   });
 
-  it("allows only admin to connect mailboxes", () => {
-    expect(canConnectMailbox("admin")).toBe(true);
-    expect(canConnectMailbox("member")).toBe(false);
+  it("allows admin to connect any operator mailbox", () => {
+    expect(
+      canConnectMailbox({
+        role: "admin",
+        actorEmail: owner,
+        mailboxEmail: partner,
+      }),
+    ).toBe(true);
+  });
+
+  it("allows a member to connect only their own mailbox", () => {
+    expect(
+      canConnectMailbox({
+        role: "member",
+        actorEmail: partner,
+        mailboxEmail: partner,
+      }),
+    ).toBe(true);
+    expect(
+      canConnectMailbox({
+        role: "member",
+        actorEmail: partner,
+        mailboxEmail: owner,
+      }),
+    ).toBe(false);
   });
 });
 

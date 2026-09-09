@@ -44,7 +44,7 @@ import { createManualContact } from "../lib/contacts.js";
 import {
   emailThreadRowVisible,
   emailThreadsVisibleSql,
-  loadPersonalMailboxOwner,
+  loadMailboxOwners,
 } from "../lib/email-visibility.js";
 import {
   isAllowedResume,
@@ -80,8 +80,8 @@ async function personTimeline(
   person: { id: string; email: string },
   viewer: { id: string; email: string },
 ) {
-  const owner = await loadPersonalMailboxOwner(db);
-  const visibility = emailThreadsVisibleSql(viewer, owner) ?? sql`true`;
+  const owners = await loadMailboxOwners(db);
+  const visibility = emailThreadsVisibleSql(viewer, owners) ?? sql`true`;
   const [activityRows, threadRows] = await Promise.all([
     db
       .select()
@@ -96,7 +96,7 @@ async function personTimeline(
   ]);
 
   const visibleThreads = threadRows.filter((row) =>
-    emailThreadRowVisible(row, viewer, owner),
+    emailThreadRowVisible(row, viewer, owners),
   );
   const threadIds = visibleThreads.map((row) => row.id);
   const messageRows =

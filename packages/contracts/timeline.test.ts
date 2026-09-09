@@ -25,7 +25,7 @@ function thread(
 ): EmailThreadWithMessages {
   return {
     personId: "11111111-1111-4111-8111-111111111111",
-    mailbox: "shared",
+    mailbox: "partner",
     gmailThreadId: "thread-1",
     subject: "Hello",
     snippet: "Hi",

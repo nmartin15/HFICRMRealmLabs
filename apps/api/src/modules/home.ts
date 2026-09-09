@@ -30,7 +30,7 @@ import {
 import {
   emailThreadRowVisible,
   emailThreadsVisibleSql,
-  loadPersonalMailboxOwner,
+  loadMailboxOwners,
 } from "../lib/email-visibility.js";
 import {
   serializeEmailThread,
@@ -81,8 +81,8 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
       const now = new Date();
       const todayYmd = zonedIsoDate(now);
       const today = todayBoundsUtc(now);
-      const owner = await loadPersonalMailboxOwner(app.db);
-      const visibility = emailThreadsVisibleSql(user, owner) ?? sql`true`;
+      const owners = await loadMailboxOwners(app.db);
+      const visibility = emailThreadsVisibleSql(user, owners) ?? sql`true`;
       const listed = and(
         isNull(people.deletedAt),
         eq(people.doNotContact, false),
@@ -130,12 +130,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         app.db
           .select()
           .from(emailThreads)
-          .where(
-            and(
-              eq(emailThreads.mailbox, "shared"),
-              isNull(emailThreads.personId),
-            ),
-          )
+          .where(and(visibility, isNull(emailThreads.personId)))
           .orderBy(desc(emailThreads.lastMessageAt)),
         app.db
           .select({ thread: emailThreads, person: people })
@@ -304,15 +299,17 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       );
 
-      const unmatchedEmails = unmatchedRows.map((row) => {
-        const thread = emailThreadSchema.parse(serializeEmailThread(row));
-        return {
-          id: thread.id,
-          subject: thread.subject,
-          lastMessageAt: thread.lastMessageAt,
-          snippet: thread.snippet,
-        };
-      });
+      const unmatchedEmails = unmatchedRows
+        .filter((row) => emailThreadRowVisible(row, user, owners))
+        .map((row) => {
+          const thread = emailThreadSchema.parse(serializeEmailThread(row));
+          return {
+            id: thread.id,
+            subject: thread.subject,
+            lastMessageAt: thread.lastMessageAt,
+            snippet: thread.snippet,
+          };
+        });
 
       const needsTrack = needsTrackRows.map((row) =>
         digestPerson(serializePerson(row.person)),
@@ -344,7 +341,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           person: item.person,
         })),
         ...todayEmailRows
-          .filter((row) => emailThreadRowVisible(row.thread, user, owner))
+          .filter((row) => emailThreadRowVisible(row.thread, user, owners))
           .map((row) => ({
             kind: "thread" as const,
             thread: emailThreadSchema.parse(serializeEmailThread(row.thread)),

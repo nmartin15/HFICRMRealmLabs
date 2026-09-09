@@ -1,8 +1,7 @@
 import {
   CALENDAR_READONLY_SCOPE,
   GMAIL_READONLY_SCOPE,
-  PERSONAL_MAILBOX_EMAIL,
-  SHARED_MAILBOX_EMAIL,
+  mailboxEmailFor,
   type Mailbox,
 } from "@realm-labs/contracts";
 import { google } from "googleapis";
@@ -27,24 +26,34 @@ export function googleLoginUrl(env: Env, state: string): string {
   });
 }
 
+/**
+ * Mailbox connect reuses the login redirect URI so it works when the Google
+ * OAuth client only allowlists that callback (the usual local setup).
+ */
+export function googleMailboxRedirectUri(
+  env: Pick<Env, "GOOGLE_REDIRECT_URI">,
+): string {
+  return env.GOOGLE_REDIRECT_URI;
+}
+
 export function googleMailboxUrl(
   env: Env,
   state: string,
   mailbox: Mailbox,
 ): string {
-  const oauth2 = createOAuthClient(env, env.GOOGLE_MAILBOX_REDIRECT_URI);
-  const scopes = ["openid", "email", GMAIL_READONLY_SCOPE];
-  if (mailbox === "personal") {
-    scopes.push(CALENDAR_READONLY_SCOPE);
-  }
+  const oauth2 = createOAuthClient(env, googleMailboxRedirectUri(env));
   return oauth2.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
     hd: env.ALLOWED_HOSTED_DOMAIN,
-    scope: scopes,
+    scope: [
+      "openid",
+      "email",
+      GMAIL_READONLY_SCOPE,
+      CALENDAR_READONLY_SCOPE,
+    ],
     state,
-    login_hint:
-      mailbox === "personal" ? PERSONAL_MAILBOX_EMAIL : SHARED_MAILBOX_EMAIL,
+    login_hint: mailboxEmailFor(mailbox),
   });
 }
 
@@ -122,7 +131,7 @@ export async function exchangeGoogleMailboxCode(
 ): Promise<GoogleMailboxGrant> {
   const { oauth2, tokens } = await exchangeCode(
     env,
-    env.GOOGLE_MAILBOX_REDIRECT_URI,
+    googleMailboxRedirectUri(env),
     code,
   );
   const refreshToken = tokens.refresh_token;
