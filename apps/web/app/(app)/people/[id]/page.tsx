@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import type {
   CompleteTaskBody,
+  EmailMessageDirection,
   Person,
   PersonDetailResponse,
   PersonPatch,
@@ -32,8 +33,9 @@ import {
   formatDate,
   formatDateTime,
   fromDatetimeLocalValue,
+  toDatetimeLocalValue,
 } from "@/lib/format";
-import { useListNavigation } from "@/hooks/use-list-navigation";
+import { isTypingTarget, useListNavigation } from "@/hooks/use-list-navigation";
 import { CompleteTaskForm } from "@/components/complete-task-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +50,11 @@ const SOURCE_LABEL: Record<Person["source"], string> = {
   website: "Website",
 };
 
+const DIRECTION_LABEL: Record<EmailMessageDirection, string> = {
+  inbound: "In",
+  outbound: "Out",
+  other: "Other",
+};
 const TASK_KINDS: TaskKind[] = ["email", "call", "meeting", "dnc"];
 const TRACKS: ProgramTrack[] = [
   "allocation",
@@ -96,10 +103,13 @@ export default function PersonRecordPage() {
   const [taskNotes, setTaskNotes] = useState("");
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [completingId, setCompletingId] = useState<string | null>(null);
+  const [draftTaskKind, setDraftTaskKind] = useState<TaskKind>("email");
+  const [draftTaskDue, setDraftTaskDue] = useState(defaultTaskDueLocal);
   const [draftTaskNotes, setDraftTaskNotes] = useState("");
   const [personNotes, setPersonNotes] = useState("");
   const [saveHint, setSaveHint] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [personRes, userRes] = await Promise.all([
@@ -120,6 +130,34 @@ export default function PersonRecordPage() {
 
   const timeline = detail?.timeline ?? [];
   const selected = useListNavigation(timeline.length);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (isTypingTarget(event.target)) {
+        return;
+      }
+      if (event.key === "Escape") {
+        if (expandedThreadId) {
+          event.preventDefault();
+          setExpandedThreadId(null);
+        }
+        return;
+      }
+      if (event.key !== "Enter") {
+        return;
+      }
+      const item = timeline[selected];
+      if (!item || item.kind !== "email") {
+        return;
+      }
+      event.preventDefault();
+      setExpandedThreadId((current) =>
+        current === item.thread.id ? null : item.thread.id,
+      );
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expandedThreadId, selected, timeline]);
 
   async function patch(body: PersonPatch) {
     setError("");
@@ -162,29 +200,22 @@ export default function PersonRecordPage() {
     }
   }
 
-  async function saveTaskNotes(taskId: string) {
+  async function saveTask(taskId: string) {
     setError("");
     try {
-      const task = await api<Task>(`/people/${id}/tasks/${taskId}`, {
+      await api<Task>(`/people/${id}/tasks/${taskId}`, {
         method: "PATCH",
         body: JSON.stringify({
+          kind: draftTaskKind,
+          dueAt: fromDatetimeLocalValue(draftTaskDue),
           notes: draftTaskNotes.trim() ? draftTaskNotes.trim() : null,
         }),
       });
-      setDetail((current) =>
-        current
-          ? {
-              ...current,
-              tasks: current.tasks.map((row) =>
-                row.id === task.id ? task : row,
-              ),
-            }
-          : current,
-      );
-      setSaveHint("Task notes saved");
+      setSaveHint("Task saved");
       window.setTimeout(() => setSaveHint(""), 1500);
+      await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save task notes");
+      setError(err instanceof Error ? err.message : "Failed to save task");
     }
   }
 
@@ -229,6 +260,8 @@ export default function PersonRecordPage() {
 
   function openTask(task: Task) {
     setExpandedTaskId(task.id);
+    setDraftTaskKind(task.kind);
+    setDraftTaskDue(toDatetimeLocalValue(task.dueAt));
     setDraftTaskNotes(task.notes ?? "");
     setCompletingId(null);
   }
@@ -570,11 +603,10 @@ export default function PersonRecordPage() {
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Tasks</h2>
         <p className="text-xs text-muted-foreground">
-          Save notes keeps a task open (prep for the email or call).
+          Type, due date, and notes stay editable after save. Each change
+          is recorded on the timeline.
           I finished this closes it after you actually did the work.
           A next follow-up is asked only when this is the last open task.
-          Closed tasks are history. The only action is a quiet
-          “Completed in error” if you closed the wrong one.
           {saveHint ? ` · ${saveHint}` : ""}
         </p>
         {openTasks.length === 0 ? (
@@ -638,7 +670,7 @@ export default function PersonRecordPage() {
                           : openTask(task)
                       }
                     >
-                      Add notes
+                      Edit
                     </Button>
                     <Button
                       type="button"
@@ -685,38 +717,17 @@ export default function PersonRecordPage() {
                   )}
                 </div>
                 {expandedTaskId === task.id && completingId !== task.id ? (
-                  <div className="space-y-2 rounded-md border bg-muted/30 p-2">
-                    <p className="text-xs text-muted-foreground">
-                      Save notes keeps this {TASK_KIND_LABELS[task.kind].toLowerCase()}{" "}
-                      open. It does not close the task.
-                    </p>
-                    <Label htmlFor={`task-notes-${task.id}`}>Notes for this task</Label>
-                    <textarea
-                      id={`task-notes-${task.id}`}
-                      rows={3}
-                      value={draftTaskNotes}
-                      onChange={(event) => setDraftTaskNotes(event.target.value)}
-                      placeholder="Talking points, email draft context, call agenda…"
-                      className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => void saveTaskNotes(task.id)}
-                      >
-                        Save notes — keep open
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setExpandedTaskId(null)}
-                      >
-                        Close
-                      </Button>
-                    </div>
-                  </div>
+                  <TaskEditFields
+                    taskId={task.id}
+                    kind={draftTaskKind}
+                    due={draftTaskDue}
+                    notes={draftTaskNotes}
+                    onKind={setDraftTaskKind}
+                    onDue={setDraftTaskDue}
+                    onNotes={setDraftTaskNotes}
+                    onSave={() => void saveTask(task.id)}
+                    onClose={() => setExpandedTaskId(null)}
+                  />
                 ) : null}
                 {completingId === task.id ? (
                   <CompleteTaskForm
@@ -797,7 +808,7 @@ export default function PersonRecordPage() {
               {closedTasks.map((task) => {
                 const audit = completionAudit(task.id, timeline, users);
                 return (
-                <li key={task.id} className="px-3 py-2 text-sm">
+                <li key={task.id} className="space-y-2 px-3 py-2 text-sm">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                   {TASK_KIND_LABELS[task.kind]} · {task.status} · due{" "}
@@ -817,13 +828,42 @@ export default function PersonRecordPage() {
                     </span>
                   ) : null}
                     </div>
-                    <CompletedInErrorControl
-                      confirm={removingId === task.id}
-                      onAsk={() => setRemovingId(task.id)}
-                      onCancel={() => setRemovingId(null)}
-                      onConfirm={() => void deleteTask(task.id)}
-                    />
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={
+                          expandedTaskId === task.id ? "default" : "outline"
+                        }
+                        onClick={() =>
+                          expandedTaskId === task.id
+                            ? setExpandedTaskId(null)
+                            : openTask(task)
+                        }
+                      >
+                        Edit
+                      </Button>
+                      <CompletedInErrorControl
+                        confirm={removingId === task.id}
+                        onAsk={() => setRemovingId(task.id)}
+                        onCancel={() => setRemovingId(null)}
+                        onConfirm={() => void deleteTask(task.id)}
+                      />
+                    </div>
                   </div>
+                  {expandedTaskId === task.id ? (
+                    <TaskEditFields
+                      taskId={task.id}
+                      kind={draftTaskKind}
+                      due={draftTaskDue}
+                      notes={draftTaskNotes}
+                      onKind={setDraftTaskKind}
+                      onDue={setDraftTaskDue}
+                      onNotes={setDraftTaskNotes}
+                      onSave={() => void saveTask(task.id)}
+                      onClose={() => setExpandedTaskId(null)}
+                    />
+                  ) : null}
                 </li>
                 );
               })}
@@ -835,7 +875,7 @@ export default function PersonRecordPage() {
       <section className="space-y-2">
         <h2 className="text-sm font-medium">Timeline</h2>
         <p className="text-xs text-muted-foreground">
-          j/k to move, esc to leave a field.
+          j/k to move, enter to expand email, esc to collapse.
         </p>
         {timeline.length === 0 ? (
           <p className="text-sm text-muted-foreground">No activity yet.</p>
@@ -845,13 +885,99 @@ export default function PersonRecordPage() {
               <TimelineRow
                 key={`${item.kind}-${item.occurredAt}-${index}`}
                 item={item}
+                index={index}
                 active={index === selected}
+                expanded={
+                  item.kind === "email" && expandedThreadId === item.thread.id
+                }
                 users={users}
               />
             ))}
           </ol>
         )}
       </section>
+    </div>
+  );
+}
+
+function TaskEditFields({
+  taskId,
+  kind,
+  due,
+  notes,
+  onKind,
+  onDue,
+  onNotes,
+  onSave,
+  onClose,
+}: {
+  taskId: string;
+  kind: TaskKind;
+  due: string;
+  notes: string;
+  onKind: (kind: TaskKind) => void;
+  onDue: (due: string) => void;
+  onNotes: (notes: string) => void;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/30 p-2">
+      <p className="text-xs text-muted-foreground">
+        Fix type, due date, or notes. The timeline keeps a record of the
+        change.
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor={`edit-kind-${taskId}`}>Type</Label>
+          <select
+            id={`edit-kind-${taskId}`}
+            className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
+            value={kind}
+            onChange={(event) => onKind(event.target.value as TaskKind)}
+          >
+            {TASK_KINDS.map((value) => (
+              <option key={value} value={value}>
+                {TASK_KIND_LABELS[value]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`edit-due-${taskId}`}>Due</Label>
+          <Input
+            id={`edit-due-${taskId}`}
+            type="datetime-local"
+            required
+            value={due}
+            onChange={(event) => onDue(event.target.value)}
+          />
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <Label htmlFor={`edit-notes-${taskId}`}>Notes</Label>
+          <textarea
+            id={`edit-notes-${taskId}`}
+            rows={3}
+            required={kind === "dnc"}
+            value={notes}
+            onChange={(event) => onNotes(event.target.value)}
+            placeholder={
+              kind === "dnc"
+                ? "DNC reason (required)"
+                : "Talking points, email draft context, call agenda…"
+            }
+            className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" onClick={onSave}>
+          Save
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onClose}>
+          Close
+        </Button>
+      </div>
     </div>
   );
 }
@@ -921,12 +1047,12 @@ function taskGuideCopy(
   if (guide === "follow-up") {
     return {
       badge: "Follow-up",
-      hint: `Next step · due ${due} · saved ${saved}. Add notes to prepare. I finished this only after you do the work.`,
+      hint: `Next step · due ${due} · saved ${saved}. Edit if the date or type is wrong. I finished this only after you do the work.`,
     };
   }
   return {
     badge: "To do",
-    hint: `Due ${due} · saved ${saved}. Save notes keeps it open. I finished this closes it after you do the work.`,
+      hint: `Due ${due} · saved ${saved}. Edit if the date or type is wrong. I finished this closes it after you do the work.`,
   };
 }
 
@@ -952,15 +1078,22 @@ function completionAudit(
 
 function TimelineRow({
   item,
+  index,
   active,
+  expanded,
   users,
 }: {
   item: TimelineItem;
+  index: number;
   active: boolean;
+  expanded: boolean;
   users: User[];
 }) {
   return (
-    <li className={cn("px-3 py-2 text-sm", active && "bg-primary/10")}>
+    <li
+      data-nav-index={index}
+      className={cn("px-3 py-2 text-sm", active && "bg-primary/10")}
+    >
       <p className="text-xs text-muted-foreground">
         {formatDateTime(item.occurredAt)}
         {item.kind === "activity"
@@ -971,14 +1104,49 @@ function TimelineRow({
         <p>{activitySummary(item.activity)}</p>
       ) : null}
       {item.kind === "email" ? (
-        <p>
-          Email · {item.thread.subject}
-          {item.thread.snippet ? (
-            <span className="block text-muted-foreground">
-              {item.thread.snippet}
-            </span>
+        <div>
+          <p>
+            Email · {item.thread.subject}
+            {item.thread.snippet && !expanded ? (
+              <span className="block text-muted-foreground">
+                {item.thread.snippet}
+              </span>
+            ) : null}
+          </p>
+          {expanded ? (
+            <ol className="mt-2 space-y-3 border-l pl-3">
+              {item.thread.messages.length === 0 ? (
+                <li className="text-xs text-muted-foreground">
+                  No messages synced yet.
+                </li>
+              ) : (
+                item.thread.messages.map((message) => (
+                  <li key={message.id} className="space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      {DIRECTION_LABEL[message.direction]} ·{" "}
+                      {formatDateTime(message.sentAt)}
+                    </p>
+                    <p className="text-xs">
+                      From {message.fromEmail || "(unknown)"}
+                      {message.toEmails.length > 0
+                        ? ` → ${message.toEmails.join(", ")}`
+                        : ""}
+                    </p>
+                    {message.bodyText ? (
+                      <pre className="overflow-x-auto whitespace-pre-wrap font-sans text-sm text-foreground">
+                        {message.bodyText}
+                      </pre>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        (no text body)
+                      </p>
+                    )}
+                  </li>
+                ))
+              )}
+            </ol>
           ) : null}
-        </p>
+        </div>
       ) : null}
     </li>
   );

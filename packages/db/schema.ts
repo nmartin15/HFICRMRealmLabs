@@ -282,6 +282,30 @@ export const emailThreads = pgTable(
   ],
 );
 
+export const emailMessages = pgTable(
+  "email_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => emailThreads.id),
+    gmailMessageId: text("gmail_message_id").notNull(),
+    fromEmail: text("from_email").notNull(),
+    toEmails: text("to_emails").array().notNull(),
+    ccEmails: text("cc_emails").array().notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true, mode: "date" }).notNull(),
+    bodyText: text("body_text").notNull(),
+    snippet: text("snippet"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("email_messages_thread_gmail_message_id_unique").on(
+      table.threadId,
+      table.gmailMessageId,
+    ),
+  ],
+);
+
 export const activities = pgTable("activities", {
   id: uuid("id").primaryKey().defaultRandom(),
   personId: uuid("person_id").references(() => people.id),
@@ -373,10 +397,18 @@ export const meetingsRelations = relations(meetings, ({ one }) => ({
   }),
 }));
 
-export const emailThreadsRelations = relations(emailThreads, ({ one }) => ({
+export const emailThreadsRelations = relations(emailThreads, ({ one, many }) => ({
   person: one(people, {
     fields: [emailThreads.personId],
     references: [people.id],
+  }),
+  messages: many(emailMessages),
+}));
+
+export const emailMessagesRelations = relations(emailMessages, ({ one }) => ({
+  thread: one(emailThreads, {
+    fields: [emailMessages.threadId],
+    references: [emailThreads.id],
   }),
 }));
 

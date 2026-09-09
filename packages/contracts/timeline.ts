@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { activitySchema, type Activity } from "./activities";
-import { emailThreadSchema, type EmailThread } from "./email-threads";
+import {
+  emailThreadWithMessagesSchema,
+  type EmailThreadWithMessages,
+} from "./email-threads";
 import { isoDateTimeSchema } from "./enums";
 
 export const timelineItemSchema = z.discriminatedUnion("kind", [
@@ -12,7 +15,7 @@ export const timelineItemSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("email"),
     occurredAt: isoDateTimeSchema,
-    thread: emailThreadSchema,
+    thread: emailThreadWithMessagesSchema,
   }),
 ]);
 export type TimelineItem = z.infer<typeof timelineItemSchema>;
@@ -24,7 +27,7 @@ const KIND_ORDER: Record<TimelineItem["kind"], number> = {
 
 export function mergePersonTimeline(input: {
   activities: Activity[];
-  threads: EmailThread[];
+  threads: EmailThreadWithMessages[];
 }): TimelineItem[] {
   const items: TimelineItem[] = [
     ...input.activities.map((activity) => ({

@@ -3,6 +3,7 @@ import {
   cancelledMeetingResolution,
   DISPLAY_TIME_ZONE,
   emailSnippet,
+  extractGmailPlainText,
   gmailSyncJobDataSchema,
   isInboundReply,
   mailboxEmails,
@@ -14,6 +15,7 @@ import {
 } from "@realm-labs/contracts";
 import {
   decryptSecret,
+  emailMessages,
   emailThreads,
   mailboxConnections,
   people,
@@ -172,7 +174,7 @@ async function upsertGmailThread(
     actor: Actor;
     mailboxAddresses: readonly string[];
   },
-): Promise<void> {
+): Promise<{ id: string }> {
   const existingRows = await db
     .select()
     .from(emailThreads)
@@ -188,6 +190,7 @@ async function upsertGmailThread(
   const isNewMessage =
     !existing || existing.lastMessageAt.getTime() < input.lastMessageAt.getTime();
 
+  let threadId: string;
   if (existing) {
     await db
       .update(emailThreads)
@@ -200,26 +203,35 @@ async function upsertGmailThread(
         sharedVisible: input.mailbox === "shared",
       })
       .where(eq(emailThreads.id, existing.id));
+    threadId = existing.id;
   } else {
-    await db.insert(emailThreads).values({
-      personId,
-      mailbox: input.mailbox,
-      gmailThreadId: input.threadId,
-      subject: input.subject,
-      lastMessageAt: input.lastMessageAt,
-      snippet: input.snippet,
-      participantEmails: input.participantEmails,
-      sharedVisible: input.mailbox === "shared",
-    });
+    const inserted = await db
+      .insert(emailThreads)
+      .values({
+        personId,
+        mailbox: input.mailbox,
+        gmailThreadId: input.threadId,
+        subject: input.subject,
+        lastMessageAt: input.lastMessageAt,
+        snippet: input.snippet,
+        participantEmails: input.participantEmails,
+        sharedVisible: input.mailbox === "shared",
+      })
+      .returning({ id: emailThreads.id });
+    const row = inserted[0];
+    if (!row) {
+      throw new Error("Failed to insert email thread");
+    }
+    threadId = row.id;
   }
 
   if (!personId || !isNewMessage) {
-    return;
+    return { id: threadId };
   }
 
   const person = input.people.find((row) => row.id === personId);
   if (!person) {
-    return;
+    return { id: threadId };
   }
 
   await writeActivity(db, {
@@ -255,6 +267,64 @@ async function upsertGmailThread(
       when: input.lastMessageAt,
     });
   }
+
+  return { id: threadId };
+}
+
+async function upsertGmailMessages(
+  db: Database,
+  threadId: string,
+  messages: gmail_v1.Schema$Message[],
+): Promise<void> {
+  const existingRows = await db
+    .select()
+    .from(emailMessages)
+    .where(eq(emailMessages.threadId, threadId));
+  const existingByGmailId = new Map(
+    existingRows.map((row) => [row.gmailMessageId, row]),
+  );
+
+  for (const message of messages) {
+    const gmailMessageId = message.id;
+    if (!gmailMessageId) {
+      continue;
+    }
+    const headers = message.payload?.headers ?? [];
+    const fromEmail =
+      parseEmailAddresses(headerValue(headers, "From"))[0] ?? "";
+    const toEmails = uniqueEmails(parseEmailAddresses(headerValue(headers, "To")));
+    const ccEmails = uniqueEmails(
+      parseEmailAddresses(headerValue(headers, "Cc")),
+    );
+    const sentAt = new Date(Number(message.internalDate ?? Date.now()));
+    const bodyText = extractGmailPlainText(message.payload);
+    const snippet = emailSnippet(bodyText || message.snippet || "") || null;
+    const existing = existingByGmailId.get(gmailMessageId);
+    if (existing) {
+      await db
+        .update(emailMessages)
+        .set({
+          fromEmail,
+          toEmails,
+          ccEmails,
+          sentAt,
+          bodyText,
+          snippet,
+        })
+        .where(eq(emailMessages.id, existing.id));
+    } else {
+      await db.insert(emailMessages).values({
+        threadId,
+        gmailMessageId,
+        fromEmail,
+        toEmails,
+        ccEmails,
+        sentAt,
+        bodyText,
+        snippet,
+      });
+    }
+  }
 }
 
 async function processGmailThread(
@@ -271,16 +341,7 @@ async function processGmailThread(
   const { data } = await gmail.users.threads.get({
     userId: "me",
     id: input.threadId,
-    format: "metadata",
-    metadataHeaders: [
-      "From",
-      "To",
-      "Cc",
-      "Bcc",
-      "Subject",
-      "In-Reply-To",
-      "References",
-    ],
+    format: "full",
   });
 
   const messages = data.messages ?? [];
@@ -320,14 +381,17 @@ async function processGmailThread(
   const subject =
     headerValue(latestHeaders, "Subject") || data.snippet || "(no subject)";
   const lastMessageAt = new Date(Number(latest.internalDate ?? Date.now()));
-  const snippet = emailSnippet(latest.snippet ?? data.snippet ?? "");
+  const latestBody = extractGmailPlainText(latest.payload);
+  const snippet = emailSnippet(
+    latestBody || latest.snippet || data.snippet || "",
+  );
   const matched = matchPersonFromParticipants(
     participantEmails,
     input.people,
     input.mailboxAddresses,
   );
 
-  await upsertGmailThread(db, {
+  const thread = await upsertGmailThread(db, {
     mailbox: input.mailbox,
     threadId: input.threadId,
     subject,
@@ -342,6 +406,7 @@ async function processGmailThread(
     actor: input.actor,
     mailboxAddresses: input.mailboxAddresses,
   });
+  await upsertGmailMessages(db, thread.id, sorted);
 }
 
 export async function runGmailSync(

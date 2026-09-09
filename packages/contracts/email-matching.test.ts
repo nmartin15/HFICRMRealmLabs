@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   canonicalEmail,
+  decodeGmailBase64Url,
+  emailMessageDirection,
   emailSnippet,
   emailsMatch,
+  extractGmailPlainText,
+  htmlToPlainText,
   isInboundFromPerson,
   isInboundReply,
   matchPersonFromParticipants,
@@ -121,5 +125,82 @@ describe("email matching", () => {
   it("stores snippets only, truncated to 300 characters", () => {
     const snippet = emailSnippet(`  ${"a".repeat(400)}  `);
     expect(snippet.length).toBe(300);
+  });
+
+  it("labels outbound mailbox From and inbound person From", () => {
+    expect(
+      emailMessageDirection({
+        fromEmail: PERSONAL_MAILBOX_EMAIL,
+        personEmail: jane.email,
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBe("outbound");
+    expect(
+      emailMessageDirection({
+        fromEmail: "JANE+jobs@example.com",
+        personEmail: jane.email,
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBe("inbound");
+    expect(
+      emailMessageDirection({
+        fromEmail: "other@example.com",
+        personEmail: jane.email,
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBe("other");
+  });
+
+  it("extracts text/plain from nested Gmail MIME and ignores HTML", () => {
+    const plain = btoa("Hello from Jane");
+    const html = btoa("<p>HTML body</p>");
+    const body = extractGmailPlainText({
+      mimeType: "multipart/mixed",
+      parts: [
+        {
+          mimeType: "multipart/alternative",
+          parts: [
+            { mimeType: "text/plain", body: { data: plain } },
+            { mimeType: "text/html", body: { data: html } },
+          ],
+        },
+        {
+          mimeType: "application/pdf",
+          filename: "resume.pdf",
+          body: { data: btoa("not-text") },
+        },
+      ],
+    });
+    expect(body).toBe("Hello from Jane");
+  });
+
+  it("falls back to stripped HTML when there is no text/plain", () => {
+    const html = btoa(
+      "<p>Hi &amp; welcome</p><br>Line 2<script>alert(1)</script>",
+    );
+    expect(
+      extractGmailPlainText({
+        mimeType: "text/html",
+        body: { data: html },
+      }),
+    ).toBe("Hi & welcome\n\nLine 2");
+  });
+
+  it("decodes Gmail base64url and does not truncate bodies", () => {
+    const long = `Hello ${"a".repeat(400)}`;
+    const encoded = btoa(long).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    expect(decodeGmailBase64Url(encoded)).toBe(long);
+    expect(
+      extractGmailPlainText({
+        mimeType: "text/plain",
+        body: { data: encoded },
+      }),
+    ).toBe(long);
+  });
+
+  it("converts HTML entities and tags to plain text", () => {
+    expect(htmlToPlainText("<div>A&nbsp;B &#39;quote&#x27;</div>")).toBe(
+      "A B 'quote'",
+    );
   });
 });

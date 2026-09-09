@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { emailMessageSchema } from "./email-messages";
 import {
   emailSchema,
   isoDateTimeSchema,
@@ -20,6 +21,13 @@ export const emailThreadSchema = z.object({
   updatedAt: isoDateTimeSchema,
 });
 export type EmailThread = z.infer<typeof emailThreadSchema>;
+
+export const emailThreadWithMessagesSchema = emailThreadSchema.extend({
+  messages: z.array(emailMessageSchema),
+});
+export type EmailThreadWithMessages = z.infer<
+  typeof emailThreadWithMessagesSchema
+>;
 
 export const emailThreadInsertSchema = emailThreadSchema
   .omit({

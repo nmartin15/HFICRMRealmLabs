@@ -5,7 +5,7 @@ import {
   isFollowUpTask,
   planCompleteTask,
   planCreateTask,
-  planUpdateTaskNotes,
+  planUpdateTask,
 } from "./tasks";
 
 describe("planCreateTask", () => {
@@ -37,25 +37,65 @@ describe("planCreateTask", () => {
   });
 });
 
-describe("planUpdateTaskNotes", () => {
+describe("planUpdateTask", () => {
+  const openEmail = {
+    currentStatus: "open",
+    currentKind: "email" as const,
+    currentDueAt: "2026-09-08T16:00:00.000Z",
+    currentNotes: "Prep",
+    currentOutcome: null,
+    personDeleted: false,
+  };
+
   it("updates notes on an open task", () => {
     expect(
-      planUpdateTaskNotes({
-        currentStatus: "open",
-        currentKind: "email",
+      planUpdateTask({
+        ...openEmail,
         notes: "Talk about runway",
       }),
-    ).toEqual({ ok: true, notes: "Talk about runway" });
+    ).toMatchObject({
+      ok: true,
+      notes: "Talk about runway",
+      changed: true,
+    });
   });
 
-  it("rejects edits on closed tasks", () => {
+  it("lets a saved due date be corrected", () => {
     expect(
-      planUpdateTaskNotes({
-        currentStatus: "done",
-        currentKind: "email",
-        notes: "Too late",
+      planUpdateTask({
+        ...openEmail,
+        dueAt: "2026-09-10T16:00:00.000Z",
       }),
-    ).toMatchObject({ ok: false, code: "TASK_NOT_OPEN" });
+    ).toMatchObject({
+      ok: true,
+      dueAt: "2026-09-10T16:00:00.000Z",
+      changed: true,
+    });
+  });
+
+  it("allows edits on closed tasks", () => {
+    expect(
+      planUpdateTask({
+        ...openEmail,
+        currentStatus: "done",
+        dueAt: "2026-09-09T16:00:00.000Z",
+        notes: "Wrong date, fixed",
+      }),
+    ).toMatchObject({
+      ok: true,
+      dueAt: "2026-09-09T16:00:00.000Z",
+      notes: "Wrong date, fixed",
+    });
+  });
+
+  it("requires notes when the type is DNC", () => {
+    expect(
+      planUpdateTask({
+        ...openEmail,
+        kind: "dnc",
+        notes: "  ",
+      }),
+    ).toMatchObject({ ok: false, code: "DNC_REASON_REQUIRED" });
   });
 });
 
@@ -225,6 +265,24 @@ describe("describeTaskActivity", () => {
         },
       }),
     ).toBe("Saved follow-up Email");
+  });
+
+  it("names due date corrections on the timeline", () => {
+    expect(
+      describeTaskActivity({
+        what: "task.update",
+        before: {
+          kind: "email",
+          dueAt: "2026-09-08T16:00:00.000Z",
+          notes: "Prep",
+        },
+        after: {
+          kind: "email",
+          dueAt: "2026-09-10T16:00:00.000Z",
+          notes: "Prep",
+        },
+      }),
+    ).toBe("Updated Email due date");
   });
 });
 

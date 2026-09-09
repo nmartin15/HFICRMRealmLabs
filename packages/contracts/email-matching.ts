@@ -1,5 +1,6 @@
 import { CONFIGURED_MAILBOXES } from "./mailboxes";
 import { normalizeEmail } from "./hosted-domain";
+import type { EmailMessageDirection } from "./email-messages";
 
 export const EMAIL_SNIPPET_MAX_CHARS = 300;
 
@@ -132,4 +133,123 @@ export function isInboundReply(input: {
     return true;
   }
   return Boolean(input.inReplyTo?.trim());
+}
+
+export function emailMessageDirection(input: {
+  fromEmail: string;
+  personEmail: string | null;
+  mailboxAddresses?: readonly string[];
+}): EmailMessageDirection {
+  const mailboxes = input.mailboxAddresses ?? mailboxEmails();
+  if (!input.fromEmail.trim()) {
+    return "other";
+  }
+  if (isMailboxAddress(input.fromEmail, mailboxes)) {
+    return "outbound";
+  }
+  if (input.personEmail && emailsMatch(input.fromEmail, input.personEmail)) {
+    return "inbound";
+  }
+  return "other";
+}
+
+export type GmailMimePart = {
+  mimeType?: string | null;
+  filename?: string | null;
+  body?: { data?: string | null } | null;
+  parts?: GmailMimePart[] | null;
+};
+
+export function decodeGmailBase64Url(data: string): string {
+  const normalized = data.replace(/-/g, "+").replace(/_/g, "/");
+  const padded =
+    normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+function fromCodePoint(code: number): string {
+  if (!Number.isInteger(code) || code < 0 || code > 0x10ffff) {
+    return "";
+  }
+  return String.fromCodePoint(code);
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex: string) =>
+      fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/&#(\d+);/g, (_match, dec: string) =>
+      fromCodePoint(Number.parseInt(dec, 10)),
+    );
+}
+
+export function htmlToPlainText(html: string): string {
+  const withoutNoise = html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "");
+  const withBreaks = withoutNoise
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/tr>/gi, "\n")
+    .replace(/<\/h[1-6]>/gi, "\n\n")
+    .replace(/<\/li>/gi, "\n");
+  const stripped = withBreaks.replace(/<[^>]+>/g, "");
+  return decodeHtmlEntities(stripped).replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function collectMimeText(part: GmailMimePart | null | undefined): {
+  plains: string[];
+  htmls: string[];
+} {
+  const plains: string[] = [];
+  const htmls: string[] = [];
+  if (!part) {
+    return { plains, htmls };
+  }
+
+  const filename = part.filename?.trim() ?? "";
+  const mime = (part.mimeType ?? "").toLowerCase();
+  if (filename && !mime.startsWith("text/")) {
+    return { plains, htmls };
+  }
+
+  if (mime === "text/plain" && part.body?.data) {
+    plains.push(decodeGmailBase64Url(part.body.data));
+  } else if (mime === "text/html" && part.body?.data) {
+    htmls.push(decodeGmailBase64Url(part.body.data));
+  }
+
+  for (const child of part.parts ?? []) {
+    const nested = collectMimeText(child);
+    plains.push(...nested.plains);
+    htmls.push(...nested.htmls);
+  }
+  return { plains, htmls };
+}
+
+/** Prefer text/plain MIME parts; fall back to stripped HTML. Never truncates. */
+export function extractGmailPlainText(
+  part: GmailMimePart | null | undefined,
+): string {
+  const { plains, htmls } = collectMimeText(part);
+  if (plains.length > 0) {
+    return plains.join("\n\n").trim();
+  }
+  if (htmls.length > 0) {
+    return htmlToPlainText(htmls.join("\n")).trim();
+  }
+  return "";
 }

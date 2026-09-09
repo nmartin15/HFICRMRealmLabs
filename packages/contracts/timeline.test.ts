@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Activity } from "./activities";
-import type { EmailThread } from "./email-threads";
+import type { EmailThreadWithMessages } from "./email-threads";
 import { mergePersonTimeline } from "./timeline";
 
 const base = {
@@ -20,8 +20,9 @@ function activity(overrides: Partial<Activity> & Pick<Activity, "id" | "occurred
 }
 
 function thread(
-  overrides: Partial<EmailThread> & Pick<EmailThread, "id" | "lastMessageAt">,
-): EmailThread {
+  overrides: Partial<EmailThreadWithMessages> &
+    Pick<EmailThreadWithMessages, "id" | "lastMessageAt">,
+): EmailThreadWithMessages {
   return {
     personId: "11111111-1111-4111-8111-111111111111",
     mailbox: "shared",
@@ -30,6 +31,7 @@ function thread(
     snippet: "Hi",
     participantEmails: ["a@example.com"],
     sharedVisible: false,
+    messages: [],
     ...base,
     ...overrides,
   };

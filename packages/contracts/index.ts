@@ -7,6 +7,7 @@ export * from "./allocation-cards";
 export * from "./incubator-cards";
 export * from "./meetings";
 export * from "./email-threads";
+export * from "./email-messages";
 export * from "./activities";
 export * from "./report-inputs";
 export * from "./health";

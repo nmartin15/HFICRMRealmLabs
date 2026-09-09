@@ -20,17 +20,18 @@ import {
   personSchema,
   planCompleteTask,
   planCreateTask,
-  planUpdateTaskNotes,
+  planUpdateTask,
   taskSchema,
   updateTaskBodySchema,
   uuidSchema,
 } from "@realm-labs/contracts";
 import { z } from "zod";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
-import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import {
   activities,
   allocationCards,
+  emailMessages,
   emailThreads,
   incubatorCards,
   people,
@@ -54,7 +55,7 @@ import {
 } from "../lib/resume.js";
 import {
   serializeActivity,
-  serializeEmailThread,
+  serializeEmailThreadWithMessages,
   serializePerson,
   serializeTask,
 } from "../lib/serialize.js";
@@ -76,7 +77,7 @@ async function requirePerson(db: Database, id: string) {
 
 async function personTimeline(
   db: Database,
-  personId: string,
+  person: { id: string; email: string },
   viewer: { id: string; email: string },
 ) {
   const owner = await loadPersonalMailboxOwner(db);
@@ -85,24 +86,45 @@ async function personTimeline(
     db
       .select()
       .from(activities)
-      .where(eq(activities.personId, personId))
+      .where(eq(activities.personId, person.id))
       .orderBy(desc(activities.occurredAt)),
     db
       .select()
       .from(emailThreads)
-      .where(and(eq(emailThreads.personId, personId), visibility))
+      .where(and(eq(emailThreads.personId, person.id), visibility))
       .orderBy(desc(emailThreads.lastMessageAt)),
   ]);
 
   const visibleThreads = threadRows.filter((row) =>
     emailThreadRowVisible(row, viewer, owner),
   );
+  const threadIds = visibleThreads.map((row) => row.id);
+  const messageRows =
+    threadIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(emailMessages)
+          .where(inArray(emailMessages.threadId, threadIds))
+          .orderBy(asc(emailMessages.sentAt));
+  const messagesByThread = new Map<string, typeof messageRows>();
+  for (const message of messageRows) {
+    const list = messagesByThread.get(message.threadId) ?? [];
+    list.push(message);
+    messagesByThread.set(message.threadId, list);
+  }
 
   return mergePersonTimeline({
     activities: activityRows.map((row) =>
       activitySchema.parse(serializeActivity(row)),
     ),
-    threads: visibleThreads.map((row) => serializeEmailThread(row)),
+    threads: visibleThreads.map((row) =>
+      serializeEmailThreadWithMessages(
+        row,
+        messagesByThread.get(row.id) ?? [],
+        person.email,
+      ),
+    ),
   });
 }
 
@@ -195,7 +217,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       const row = await requirePerson(app.db, req.params.id);
       const [board, timeline, taskRows] = await Promise.all([
         personBoard(app.db, row),
-        personTimeline(app.db, row.id, actor),
+        personTimeline(app.db, row, actor),
         app.db
           .select()
           .from(tasks)
@@ -623,38 +645,73 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!current) {
         throw httpError(404, "NOT_FOUND", "Task not found");
       }
-      if (req.body.notes === undefined) {
+      if (
+        req.body.kind === undefined &&
+        req.body.dueAt === undefined &&
+        req.body.notes === undefined
+      ) {
         return taskSchema.parse(serializeTask(current));
       }
 
-      const plan = planUpdateTaskNotes({
+      const plan = planUpdateTask({
         currentStatus: current.status,
         currentKind: current.kind,
+        currentDueAt: current.dueAt.toISOString(),
+        currentNotes: current.notes,
+        currentOutcome: current.outcome,
+        personDeleted: Boolean(row.deletedAt),
+        kind: req.body.kind,
+        dueAt: req.body.dueAt,
         notes: req.body.notes,
       });
       if (!plan.ok) {
         throw httpError(plan.status, plan.code, plan.message);
       }
+      if (!plan.changed) {
+        return taskSchema.parse(serializeTask(current));
+      }
 
       const [updated] = await app.db
         .update(tasks)
-        .set({ notes: plan.notes })
+        .set({
+          kind: plan.kind,
+          dueAt: new Date(plan.dueAt),
+          notes: plan.notes,
+          outcome: plan.outcome,
+        })
         .where(eq(tasks.id, current.id))
         .returning();
       if (!updated) {
         throw httpError(500, "INTERNAL", "Failed to update task");
       }
 
+      if (plan.setDoNotContact && !row.doNotContact) {
+        await app.db
+          .update(people)
+          .set({ doNotContact: true, programTrack: null })
+          .where(eq(people.id, row.id));
+      }
+
       await writeActivity(app.db, {
         personId: row.id,
         userId: actor.id,
-        type: "note",
+        type: "field_change",
         payload: {
           who: { id: actor.id, email: actor.email },
-          what: "task.notes",
+          what: "task.update",
           when: new Date().toISOString(),
-          before: { notes: current.notes },
-          after: { notes: updated.notes },
+          before: {
+            taskId: current.id,
+            kind: current.kind,
+            dueAt: current.dueAt.toISOString(),
+            notes: current.notes,
+          },
+          after: {
+            taskId: updated.id,
+            kind: updated.kind,
+            dueAt: updated.dueAt.toISOString(),
+            notes: updated.notes,
+          },
         },
       });
       return taskSchema.parse(serializeTask(updated));

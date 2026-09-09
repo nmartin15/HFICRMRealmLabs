@@ -1,16 +1,20 @@
 import type {
   Activity,
   AllocationCard,
+  EmailMessage,
   EmailThread,
+  EmailThreadWithMessages,
   IncubatorCard,
   Meeting,
   Person,
   Task,
   User,
 } from "@realm-labs/contracts";
+import { emailMessageDirection } from "@realm-labs/contracts";
 import {
   activities,
   allocationCards,
+  emailMessages,
   emailThreads,
   incubatorCards,
   meetings,
@@ -27,6 +31,7 @@ type MeetingRow = typeof meetings.$inferSelect;
 type TaskRow = typeof tasks.$inferSelect;
 type ActivityRow = typeof activities.$inferSelect;
 type EmailThreadRow = typeof emailThreads.$inferSelect;
+type EmailMessageRow = typeof emailMessages.$inferSelect;
 
 export function serializeUser(row: UserRow): User {
   return {
@@ -178,6 +183,45 @@ export function serializeEmailThread(row: EmailThreadRow): EmailThread {
     sharedVisible: row.sharedVisible,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
+  };
+}
+
+export function serializeEmailMessage(
+  row: EmailMessageRow,
+  personEmail: string | null,
+): EmailMessage {
+  return {
+    id: row.id,
+    threadId: row.threadId,
+    gmailMessageId: row.gmailMessageId,
+    fromEmail: row.fromEmail,
+    toEmails: row.toEmails,
+    ccEmails: row.ccEmails,
+    sentAt: toIso(row.sentAt),
+    bodyText: row.bodyText,
+    snippet: row.snippet,
+    direction: emailMessageDirection({
+      fromEmail: row.fromEmail,
+      personEmail,
+    }),
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+  };
+}
+
+export function serializeEmailThreadWithMessages(
+  row: EmailThreadRow,
+  messages: readonly EmailMessageRow[],
+  personEmail: string | null,
+): EmailThreadWithMessages {
+  const sorted = [...messages].sort(
+    (a, b) => a.sentAt.getTime() - b.sentAt.getTime(),
+  );
+  return {
+    ...serializeEmailThread(row),
+    messages: sorted.map((message) =>
+      serializeEmailMessage(message, personEmail),
+    ),
   };
 }
 

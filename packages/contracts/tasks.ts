@@ -42,6 +42,8 @@ export const createTaskBodySchema = z.object({
 export type CreateTaskBody = z.infer<typeof createTaskBodySchema>;
 
 export const updateTaskBodySchema = z.object({
+  kind: taskKindSchema.optional(),
+  dueAt: isoDateTimeSchema.optional(),
   notes: z.string().trim().nullable().optional(),
 });
 export type UpdateTaskBody = z.infer<typeof updateTaskBodySchema>;
@@ -145,24 +147,62 @@ export function planCreateTask(
   };
 }
 
-export type PlanUpdateTaskNotesSuccess = {
+export type PlanUpdateTaskSuccess = {
   ok: true;
+  kind: TaskKind;
+  dueAt: string;
   notes: string | null;
+  outcome: MeetingOutcome | null;
+  setDoNotContact: boolean;
+  changed: boolean;
 };
 
-export function planUpdateTaskNotes(input: {
+export function planUpdateTask(input: {
   currentStatus: string;
   currentKind: TaskKind;
-  notes: string | null | undefined;
-}): PlanUpdateTaskNotesSuccess | PlanTaskWriteError {
-  if (input.currentStatus !== "open") {
-    return fail(409, "TASK_NOT_OPEN", "Only open tasks can be edited");
+  currentDueAt: string;
+  currentNotes: string | null;
+  currentOutcome: MeetingOutcome | null;
+  personDeleted: boolean;
+  kind?: TaskKind;
+  dueAt?: string;
+  notes?: string | null;
+}): PlanUpdateTaskSuccess | PlanTaskWriteError {
+  if (input.personDeleted) {
+    return fail(409, "PERSON_DELETED", "Person is deleted");
   }
-  const notes = notesOrNull(input.notes);
-  if (input.currentKind === "dnc" && !notes) {
+
+  const kind = input.kind ?? input.currentKind;
+  const dueAt = input.dueAt ?? input.currentDueAt;
+  const notes =
+    input.notes === undefined
+      ? input.currentNotes
+      : notesOrNull(input.notes);
+
+  if (kind === "dnc" && !notes) {
     return fail(400, "DNC_REASON_REQUIRED", "DNC requires a reason in notes");
   }
-  return { ok: true, notes };
+
+  let outcome: MeetingOutcome | null = input.currentOutcome;
+  if (kind !== "meeting") {
+    outcome = null;
+  } else if (input.currentKind !== "meeting" && input.currentStatus === "open") {
+    outcome = "scheduled";
+  }
+
+  return {
+    ok: true,
+    kind,
+    dueAt,
+    notes,
+    outcome,
+    setDoNotContact: kind === "dnc",
+    changed:
+      kind !== input.currentKind ||
+      dueAt !== input.currentDueAt ||
+      notes !== input.currentNotes ||
+      outcome !== input.currentOutcome,
+  };
 }
 
 export function planCompleteTask(input: {
@@ -306,7 +346,40 @@ export function describeTaskActivity(
     return `Removed ${taskKindLabel(before?.kind)} task`;
   }
 
+  if (what === "task.notes") {
+    return "Updated task notes";
+  }
+
+  if (what === "task.update") {
+    const before = asRecord(payload.before);
+    const kindLabel = taskKindLabel(after?.kind ?? before?.kind);
+    const changes: string[] = [];
+    if (before?.kind !== after?.kind) {
+      changes.push("type");
+    }
+    if (before?.dueAt !== after?.dueAt) {
+      changes.push("due date");
+    }
+    if (before?.notes !== after?.notes) {
+      changes.push("notes");
+    }
+    if (changes.length === 0) {
+      return `Updated ${kindLabel} task`;
+    }
+    return `Updated ${kindLabel} ${joinList(changes)}`;
+  }
+
   return null;
+}
+
+function joinList(items: string[]): string {
+  if (items.length === 1) {
+    return items[0] ?? "";
+  }
+  if (items.length === 2) {
+    return `${items[0]} and ${items[1]}`;
+  }
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
 export function completedTaskIdFromPayload(
