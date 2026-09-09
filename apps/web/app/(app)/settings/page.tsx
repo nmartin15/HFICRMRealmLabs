@@ -193,8 +193,8 @@ function SettingsForm() {
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Connected mailboxes</h2>
         <p className="text-xs text-muted-foreground">
-          Connect Nathan's Gmail and Calendar. Mail stays private unless
-          marked visible.
+          Connect Gmail and Calendar for Nathan and Stefano. Mail stays private
+          unless marked visible.
         </p>
         <ul className="divide-y rounded-lg border">
           {mailboxes.map((mailbox) => (
