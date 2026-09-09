@@ -11,6 +11,7 @@ import {
   canViewCard,
   canViewEmailThread,
   canViewMeeting,
+  canViewOperatorTask,
   canViewPerson,
   isListedPerson,
 } from "./visibility";
@@ -29,7 +30,26 @@ describe("team-wide visibility", () => {
 });
 
 describe("email thread visibility", () => {
-  it("hides partner threads from the other operator", () => {
+  it("shows matched contact threads to every operator", () => {
+    expect(
+      canViewEmailThread({
+        mailbox: "partner",
+        sharedVisible: false,
+        viewerEmail: owner,
+        linkedToPerson: true,
+      }),
+    ).toBe(true);
+    expect(
+      canViewEmailThread({
+        mailbox: "personal",
+        sharedVisible: false,
+        viewerEmail: partner,
+        linkedToPerson: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("hides unmatched partner threads from the other operator", () => {
     expect(
       canViewEmailThread({
         mailbox: "partner",
@@ -159,6 +179,46 @@ describe("admin-only mutations", () => {
         mailboxEmail: owner,
       }),
     ).toBe(false);
+  });
+});
+
+describe("operator task visibility", () => {
+  it("shows an operator only their own tasks", () => {
+    expect(
+      canViewOperatorTask({
+        role: "member",
+        viewerId: "stefano",
+        createdBy: "nathan",
+        includeAllOperators: false,
+      }),
+    ).toBe(false);
+    expect(
+      canViewOperatorTask({
+        role: "member",
+        viewerId: "stefano",
+        createdBy: "stefano",
+        includeAllOperators: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("lets admin include the other operator's tasks", () => {
+    expect(
+      canViewOperatorTask({
+        role: "admin",
+        viewerId: "nathan",
+        createdBy: "stefano",
+        includeAllOperators: false,
+      }),
+    ).toBe(false);
+    expect(
+      canViewOperatorTask({
+        role: "admin",
+        viewerId: "nathan",
+        createdBy: "stefano",
+        includeAllOperators: true,
+      }),
+    ).toBe(true);
   });
 });
 

@@ -45,14 +45,3 @@ export function requireUser(req: FastifyRequest): AuthedUser {
   }
   return req.user;
 }
-
-export function requireAdmin(req: FastifyRequest): AuthedUser {
-  const user = requireUser(req);
-  if (user.role !== "admin") {
-    throw Object.assign(new Error("Only admin can perform this action"), {
-      statusCode: 403,
-      code: "FORBIDDEN",
-    });
-  }
-  return user;
-}

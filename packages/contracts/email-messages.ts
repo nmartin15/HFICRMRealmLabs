@@ -23,11 +23,3 @@ export const emailMessageSchema = z.object({
   updatedAt: isoDateTimeSchema,
 });
 export type EmailMessage = z.infer<typeof emailMessageSchema>;
-
-export const emailMessageInsertSchema = emailMessageSchema.omit({
-  id: true,
-  direction: true,
-  createdAt: true,
-  updatedAt: true,
-});
-export type EmailMessageInsert = z.infer<typeof emailMessageInsertSchema>;

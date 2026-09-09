@@ -50,10 +50,6 @@ export function isConfiguredMailbox(mailbox: Mailbox): boolean {
   return CONFIGURED_MAILBOXES.some((item) => item.mailbox === mailbox);
 }
 
-export function isMailbox(value: string): value is Mailbox {
-  return mailboxSchema.safeParse(value).success;
-}
-
 export function mailboxEmailFor(mailbox: Mailbox): string {
   return MAILBOX_ADDRESSES[mailbox];
 }

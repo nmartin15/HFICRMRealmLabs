@@ -1,6 +1,7 @@
 import {
   activitySchema,
   canDeletePerson,
+  canViewOperatorTask,
   canViewPerson,
   completeTaskBodySchema,
   createPersonBodySchema,
@@ -11,6 +12,7 @@ import {
   isPipelineBoardTrack,
   mergePersonTimeline,
   okResponseSchema,
+  operatorTasksQuerySchema,
   personBoardBadgeSchema,
   personDetailResponseSchema,
   personIdParamsSchema,
@@ -205,6 +207,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
     {
       schema: {
         params: personIdParamsSchema,
+        querystring: operatorTasksQuerySchema,
         response: { 200: personDetailResponseSchema },
       },
     },
@@ -215,6 +218,8 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const row = await requirePerson(app.db, req.params.id);
+      const includeAllOperators =
+        actor.role === "admin" && req.query.operators === "all";
       const [board, timeline, taskRows] = await Promise.all([
         personBoard(app.db, row),
         personTimeline(app.db, row, actor),
@@ -228,7 +233,16 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       return personDetailResponseSchema.parse({
         person: serializePerson(row),
         board,
-        tasks: taskRows.map((task) => serializeTask(task)),
+        tasks: taskRows
+          .filter((task) =>
+            canViewOperatorTask({
+              role: actor.role,
+              viewerId: actor.id,
+              createdBy: task.createdBy,
+              includeAllOperators,
+            }),
+          )
+          .map((task) => serializeTask(task)),
         timeline,
       });
     },

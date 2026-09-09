@@ -4,7 +4,7 @@ import {
   mailboxEmailFor,
   type Mailbox,
 } from "@realm-labs/contracts";
-import { eq, or, type SQL } from "drizzle-orm";
+import { eq, isNotNull, or, type SQL } from "drizzle-orm";
 import { emailThreads, mailboxConnections, type Database } from "@realm-labs/db";
 
 export type MailboxOwner = {
@@ -57,19 +57,21 @@ export function emailThreadsVisibleSql(
   }
 
   return or(
+    isNotNull(emailThreads.personId),
     eq(emailThreads.sharedVisible, true),
     ...owned.map((mailbox) => eq(emailThreads.mailbox, mailbox)),
   );
 }
 
 export function emailThreadRowVisible(
-  row: { mailbox: Mailbox; sharedVisible: boolean },
+  row: { mailbox: Mailbox; sharedVisible: boolean; personId?: string | null },
   viewer: { id: string; email: string },
   owners: readonly MailboxOwner[],
 ): boolean {
   return canViewEmailThread({
     mailbox: row.mailbox,
     sharedVisible: row.sharedVisible,
+    linkedToPerson: Boolean(row.personId),
     viewerEmail: viewer.email,
     mailboxEmail: mailboxEmail(owners, row.mailbox),
   });

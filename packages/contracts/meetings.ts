@@ -28,18 +28,6 @@ export const meetingSchema = z.object({
 });
 export type Meeting = z.infer<typeof meetingSchema>;
 
-export const meetingInsertSchema = meetingSchema
-  .omit({
-    id: true,
-    createdAt: true,
-    updatedAt: true,
-  })
-  .extend({
-    outcome: meetingOutcomeSchema.default("scheduled"),
-    needsReview: z.boolean().default(false),
-  });
-export type MeetingInsert = z.infer<typeof meetingInsertSchema>;
-
 export const meetingIdParamsSchema = z.object({
   id: uuidSchema,
 });

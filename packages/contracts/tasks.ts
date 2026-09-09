@@ -66,6 +66,11 @@ export const personTasksResponseSchema = z.object({
 });
 export type PersonTasksResponse = z.infer<typeof personTasksResponseSchema>;
 
+export const operatorTasksQuerySchema = z.object({
+  operators: z.enum(["mine", "all"]).default("mine"),
+});
+export type OperatorTasksQuery = z.infer<typeof operatorTasksQuerySchema>;
+
 export const taskIdParamsSchema = z.object({
   personId: uuidSchema,
   taskId: uuidSchema,

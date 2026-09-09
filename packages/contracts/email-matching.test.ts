@@ -9,6 +9,8 @@ import {
   htmlToPlainText,
   isInboundFromPerson,
   isInboundReply,
+  gmailAddressSearchClause,
+  gmailContactSearchQueries,
   mailboxEmails,
   matchPersonFromParticipants,
   parseEmailAddresses,
@@ -210,5 +212,31 @@ describe("email matching", () => {
     expect(htmlToPlainText("<div>A&nbsp;B &#39;quote&#x27;</div>")).toBe(
       "A B 'quote'",
     );
+  });
+
+  it("builds Gmail search clauses for contact addresses", () => {
+    expect(gmailAddressSearchClause("Jane@Example.COM")).toBe(
+      '(from:"jane@example.com" OR to:"jane@example.com" OR cc:"jane@example.com")',
+    );
+    expect(
+      gmailContactSearchQueries(
+        [jane.email, PERSONAL_MAILBOX_EMAIL, alex.email],
+        mailboxes,
+      ),
+    ).toEqual([
+      `${gmailAddressSearchClause(jane.email)} OR ${gmailAddressSearchClause(alex.email)}`,
+    ]);
+  });
+
+  it("batches Gmail search queries under the character limit", () => {
+    const queries = gmailContactSearchQueries(
+      [jane.email, alex.email],
+      mailboxes,
+      90,
+    );
+    expect(queries).toEqual([
+      gmailAddressSearchClause(jane.email),
+      gmailAddressSearchClause(alex.email),
+    ]);
   });
 });

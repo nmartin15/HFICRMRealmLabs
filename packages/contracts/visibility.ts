@@ -7,6 +7,7 @@ export type EmailThreadVisibilityInput = {
   sharedVisible: boolean;
   viewerEmail: string;
   mailboxEmail?: string;
+  linkedToPerson?: boolean;
 };
 
 /**
@@ -30,12 +31,11 @@ export function canViewActivity(): boolean {
 }
 
 /**
- * Operator mailbox threads are visible only to that operator unless
- * shared_visible is true. Owner is the configured mailbox address
- * (or the connected Google email when supplied).
+ * Matched contact threads are visible to every operator. Unmatched threads
+ * stay private to that mailbox unless shared_visible is true.
  */
 export function canViewEmailThread(input: EmailThreadVisibilityInput): boolean {
-  if (input.sharedVisible) {
+  if (input.sharedVisible || input.linkedToPerson) {
     return true;
   }
   const ownerEmail = normalizeEmail(
@@ -63,6 +63,18 @@ export function canConnectMailbox(input: {
   return (
     normalizeEmail(input.actorEmail) === normalizeEmail(input.mailboxEmail)
   );
+}
+
+export function canViewOperatorTask(input: {
+  role: UserRole;
+  viewerId: string;
+  createdBy: string;
+  includeAllOperators: boolean;
+}): boolean {
+  if (input.createdBy === input.viewerId) {
+    return true;
+  }
+  return input.role === "admin" && input.includeAllOperators;
 }
 
 /** Do Not Contact people are omitted from lists and exports. The record page still loads. */

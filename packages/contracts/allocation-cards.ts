@@ -29,17 +29,6 @@ export const allocationCardSchema = z.object({
 });
 export type AllocationCard = z.infer<typeof allocationCardSchema>;
 
-export const allocationCardInsertSchema = allocationCardSchema
-  .omit({
-    id: true,
-    createdAt: true,
-    updatedAt: true,
-  })
-  .extend({
-    noCallAppLink: z.boolean().default(false),
-  });
-export type AllocationCardInsert = z.infer<typeof allocationCardInsertSchema>;
-
 export const allocationCardIdParamsSchema = z.object({
   id: uuidSchema,
 });

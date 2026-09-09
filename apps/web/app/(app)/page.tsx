@@ -18,7 +18,9 @@ import {
   isTypingTarget,
   useListNavigation,
 } from "@/hooks/use-list-navigation";
+import { useMe } from "@/hooks/use-me";
 import { CompleteTaskForm } from "@/components/complete-task-form";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Record<HomeTodoKind, string> = {
@@ -45,15 +47,19 @@ const KIND_CLASS: Record<HomeTodoKind, string> = {
 
 export default function HomePage() {
   const router = useRouter();
+  const { user } = useMe();
+  const [includeAllOperators, setIncludeAllOperators] = useState(false);
   const [snapshot, setSnapshot] = useState<HomeSnapshotResponse | null>(null);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const res = await api<HomeSnapshotResponse>("/home");
+    const operators =
+      user?.role === "admin" && includeAllOperators ? "all" : "mine";
+    const res = await api<HomeSnapshotResponse>(`/home?operators=${operators}`);
     setSnapshot(res);
-  }, []);
+  }, [includeAllOperators, user?.role]);
 
   useEffect(() => {
     void load()
@@ -113,6 +119,17 @@ export default function HomePage() {
           {snapshot ? formatWeekdayDate(snapshot.date) : "To-do and the day."}{" "}
           j/k to move, enter to open.
         </p>
+        {user?.role === "admin" ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="mt-2"
+            onClick={() => setIncludeAllOperators((current) => !current)}
+          >
+            {includeAllOperators ? "Showing all operators" : "Mine only"}
+          </Button>
+        ) : null}
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}

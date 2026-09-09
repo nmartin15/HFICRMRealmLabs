@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./index.ts",
-    "./tiers": "./tiers.ts"
+    ".": "./index.ts"
   },
   "types": "./index.ts",
   "scripts": {

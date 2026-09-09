@@ -12,13 +12,6 @@ export const userSchema = z.object({
 });
 export type User = z.infer<typeof userSchema>;
 
-export const userInsertSchema = userSchema.omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-export type UserInsert = z.infer<typeof userInsertSchema>;
-
 export const userListResponseSchema = z.object({
   data: z.array(userSchema),
 });

@@ -69,6 +69,39 @@ export function isMailboxAddress(
   return mailboxAddresses.some((mailbox) => emailsMatch(email, mailbox));
 }
 
+export const GMAIL_SEARCH_QUERY_MAX_CHARS = 900;
+
+export function gmailAddressSearchClause(email: string): string {
+  const quoted = `"${normalizeEmail(email).replaceAll('"', "")}"`;
+  return `(from:${quoted} OR to:${quoted} OR cc:${quoted})`;
+}
+
+export function gmailContactSearchQueries(
+  emails: readonly string[],
+  mailboxAddresses: readonly string[] = mailboxEmails(),
+  maxChars = GMAIL_SEARCH_QUERY_MAX_CHARS,
+): string[] {
+  const clauses = uniqueEmails(emails)
+    .filter((email) => !isMailboxAddress(email, mailboxAddresses))
+    .map(gmailAddressSearchClause);
+
+  const queries: string[] = [];
+  let current = "";
+  for (const clause of clauses) {
+    const next = current ? `${current} OR ${clause}` : clause;
+    if (current && next.length > maxChars) {
+      queries.push(current);
+      current = clause;
+    } else {
+      current = next;
+    }
+  }
+  if (current) {
+    queries.push(current);
+  }
+  return queries;
+}
+
 export function emailSnippet(text: string): string {
   return text.replace(/\s+/g, " ").trim().slice(0, EMAIL_SNIPPET_MAX_CHARS);
 }

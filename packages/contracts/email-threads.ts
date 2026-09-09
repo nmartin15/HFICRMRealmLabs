@@ -29,17 +29,6 @@ export type EmailThreadWithMessages = z.infer<
   typeof emailThreadWithMessagesSchema
 >;
 
-export const emailThreadInsertSchema = emailThreadSchema
-  .omit({
-    id: true,
-    createdAt: true,
-    updatedAt: true,
-  })
-  .extend({
-    sharedVisible: z.boolean().default(false),
-  });
-export type EmailThreadInsert = z.infer<typeof emailThreadInsertSchema>;
-
 export const emailThreadListResponseSchema = z.object({
   data: z.array(emailThreadSchema),
 });

@@ -21,9 +21,6 @@ export const envSchema = z.object({
   GOOGLE_REDIRECT_URI: z
     .string()
     .default("http://localhost:3000/api/auth/google/callback"),
-  GOOGLE_MAILBOX_REDIRECT_URI: z
-    .string()
-    .default("http://localhost:3000/api/mailboxes/google/callback"),
   APPLICATION_WEBHOOK_SECRET: z.string().default(""),
   WEBSITE_INTAKE_SECRET: z.string().default(""),
   WEBSITE_ORIGIN: z.string().default(""),

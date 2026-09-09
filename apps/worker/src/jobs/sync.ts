@@ -4,6 +4,7 @@ import {
   DISPLAY_TIME_ZONE,
   emailSnippet,
   extractGmailPlainText,
+  gmailContactSearchQueries,
   gmailSyncJobDataSchema,
   isInboundReply,
   isConfiguredMailbox,
@@ -24,10 +25,16 @@ import {
   users,
   type Database,
 } from "@realm-labs/db";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { google, type calendar_v3, type gmail_v1 } from "googleapis";
 import type { Env } from "../env.js";
 import { writeActivity } from "../lib/activity.js";
+import {
+  GmailQuotaPausedError,
+  callGmail,
+  createGmailQuotaBudget,
+  type GmailQuotaBudget,
+} from "../lib/gmail-rate-limit.js";
 import { googleClientFromRefreshToken } from "../lib/google.js";
 import {
   maybeMoveOnInboundReply,
@@ -109,21 +116,76 @@ async function markSyncOk(
     .where(eq(mailboxConnections.mailbox, mailbox));
 }
 
+async function deleteUnmatchedEmailThreads(db: Database): Promise<void> {
+  const unmatched = await db
+    .select({ id: emailThreads.id })
+    .from(emailThreads)
+    .where(isNull(emailThreads.personId));
+  const ids = unmatched.map((row) => row.id);
+  const chunkSize = 500;
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    await db.delete(emailMessages).where(inArray(emailMessages.threadId, chunk));
+  }
+  if (ids.length > 0) {
+    await db.delete(emailThreads).where(isNull(emailThreads.personId));
+  }
+}
+
+async function storedGmailThreadIds(
+  db: Database,
+  mailbox: Mailbox,
+): Promise<Set<string>> {
+  const rows = await db
+    .select({
+      gmailThreadId: emailThreads.gmailThreadId,
+      personId: emailThreads.personId,
+      messageId: emailMessages.id,
+    })
+    .from(emailThreads)
+    .leftJoin(emailMessages, eq(emailMessages.threadId, emailThreads.id))
+    .where(eq(emailThreads.mailbox, mailbox));
+
+  const hasMessage = new Set<string>();
+  const personByThread = new Map<string, string | null>();
+  for (const row of rows) {
+    personByThread.set(row.gmailThreadId, row.personId);
+    if (row.messageId) {
+      hasMessage.add(row.gmailThreadId);
+    }
+  }
+
+  const skip = new Set<string>();
+  for (const [gmailThreadId, personId] of personByThread) {
+    if (hasMessage.has(gmailThreadId) || !personId) {
+      skip.add(gmailThreadId);
+    }
+  }
+  return skip;
+}
+
 async function listChangedThreadIds(
   gmail: gmail_v1.Gmail,
   startHistoryId: string,
+  budget: GmailQuotaBudget,
 ): Promise<{ threadIds: string[]; historyId: string | null }> {
   const threadIds = new Set<string>();
   let pageToken: string | undefined;
   let historyId: string | null = null;
 
   do {
-    const { data } = await gmail.users.history.list({
-      userId: "me",
-      startHistoryId,
-      historyTypes: ["messageAdded"],
-      pageToken,
-    });
+    const data = await callGmail(
+      async () => {
+        const response = await gmail.users.history.list({
+          userId: "me",
+          startHistoryId,
+          historyTypes: ["messageAdded"],
+          pageToken,
+        });
+        return response.data;
+      },
+      budget,
+    );
     historyId = data.historyId ?? historyId;
     for (const item of data.history ?? []) {
       for (const added of item.messagesAdded ?? []) {
@@ -139,15 +201,26 @@ async function listChangedThreadIds(
   return { threadIds: [...threadIds], historyId };
 }
 
-async function listAllThreadIds(gmail: gmail_v1.Gmail): Promise<string[]> {
+async function listThreadIdsForQuery(
+  gmail: gmail_v1.Gmail,
+  budget: GmailQuotaBudget,
+  q: string,
+): Promise<string[]> {
   const threadIds: string[] = [];
   let pageToken: string | undefined;
   do {
-    const { data } = await gmail.users.threads.list({
-      userId: "me",
-      maxResults: 100,
-      pageToken,
-    });
+    const data = await callGmail(
+      async () => {
+        const response = await gmail.users.threads.list({
+          userId: "me",
+          maxResults: 100,
+          q,
+          pageToken,
+        });
+        return response.data;
+      },
+      budget,
+    );
     for (const thread of data.threads ?? []) {
       if (thread.id) {
         threadIds.push(thread.id);
@@ -156,6 +229,21 @@ async function listAllThreadIds(gmail: gmail_v1.Gmail): Promise<string[]> {
     pageToken = data.nextPageToken ?? undefined;
   } while (pageToken);
   return threadIds;
+}
+
+async function listContactThreadIds(
+  gmail: gmail_v1.Gmail,
+  emails: readonly string[],
+  mailboxAddresses: readonly string[],
+  budget: GmailQuotaBudget,
+): Promise<string[]> {
+  const ids = new Set<string>();
+  for (const q of gmailContactSearchQueries(emails, mailboxAddresses)) {
+    for (const threadId of await listThreadIdsForQuery(gmail, budget, q)) {
+      ids.add(threadId);
+    }
+  }
+  return [...ids];
 }
 
 async function upsertGmailThread(
@@ -327,6 +415,35 @@ async function upsertGmailMessages(
   }
 }
 
+async function getGmailThread(
+  gmail: gmail_v1.Gmail,
+  threadId: string,
+  format: "metadata" | "full",
+  budget: GmailQuotaBudget,
+): Promise<gmail_v1.Schema$Thread> {
+  return callGmail(
+    async () => {
+      const { data } = await gmail.users.threads.get({
+        userId: "me",
+        id: threadId,
+        format,
+      });
+      return data;
+    },
+    budget,
+  );
+}
+
+function sortGmailMessages(
+  messages: gmail_v1.Schema$Message[],
+): gmail_v1.Schema$Message[] {
+  return [...messages].sort((a, b) => {
+    const aDate = Number(a.internalDate ?? 0);
+    const bDate = Number(b.internalDate ?? 0);
+    return aDate - bDate;
+  });
+}
+
 async function processGmailThread(
   gmail: gmail_v1.Gmail,
   db: Database,
@@ -336,24 +453,22 @@ async function processGmailThread(
     people: PersonEmail[];
     actor: Actor;
     mailboxAddresses: readonly string[];
+    budget: GmailQuotaBudget;
   },
 ): Promise<void> {
-  const { data } = await gmail.users.threads.get({
-    userId: "me",
-    id: input.threadId,
-    format: "full",
-  });
+  const data = await getGmailThread(
+    gmail,
+    input.threadId,
+    "metadata",
+    input.budget,
+  );
 
   const messages = data.messages ?? [];
   if (messages.length === 0) {
     return;
   }
 
-  const sorted = [...messages].sort((a, b) => {
-    const aDate = Number(a.internalDate ?? 0);
-    const bDate = Number(b.internalDate ?? 0);
-    return aDate - bDate;
-  });
+  const sorted = sortGmailMessages(messages);
   const latest = sorted[sorted.length - 1];
   if (!latest) {
     return;
@@ -381,14 +496,26 @@ async function processGmailThread(
   const subject =
     headerValue(latestHeaders, "Subject") || data.snippet || "(no subject)";
   const lastMessageAt = new Date(Number(latest.internalDate ?? Date.now()));
-  const latestBody = extractGmailPlainText(latest.payload);
-  const snippet = emailSnippet(
-    latestBody || latest.snippet || data.snippet || "",
-  );
   const matched = matchPersonFromParticipants(
     participantEmails,
     input.people,
     input.mailboxAddresses,
+  );
+  if (!matched) {
+    return;
+  }
+
+  const full = await getGmailThread(
+    gmail,
+    input.threadId,
+    "full",
+    input.budget,
+  );
+  const bodies = sortGmailMessages(full.messages ?? []);
+  const latestFull = bodies[bodies.length - 1];
+  const latestBody = extractGmailPlainText(latestFull?.payload);
+  const snippet = emailSnippet(
+    latestBody || latestFull?.snippet || full.snippet || data.snippet || "",
   );
 
   const thread = await upsertGmailThread(db, {
@@ -398,15 +525,15 @@ async function processGmailThread(
     lastMessageAt,
     snippet,
     participantEmails,
-    personId: matched?.id ?? null,
+    personId: matched.id,
     latestFrom,
-    messageCount: messages.length,
+    messageCount: bodies.length,
     inReplyTo,
     people: input.people,
     actor: input.actor,
     mailboxAddresses: input.mailboxAddresses,
   });
-  await upsertGmailMessages(db, thread.id, sorted);
+  await upsertGmailMessages(db, thread.id, bodies);
 }
 
 export async function runGmailSync(
@@ -438,6 +565,8 @@ export async function runGmailSync(
     const actor = await loadActor(db, connection.connectedBy);
     const personRows = await loadPeople(db);
     const addresses = mailboxEmails();
+    const budget = createGmailQuotaBudget();
+    await deleteUnmatchedEmailThreads(db);
 
     let threadIds: string[] = [];
     let usedFullList = !connection.gmailHistoryId;
@@ -447,6 +576,7 @@ export async function runGmailSync(
         const changed = await listChangedThreadIds(
           gmail,
           connection.gmailHistoryId,
+          budget,
         );
         threadIds = changed.threadIds;
       } catch (err) {
@@ -458,22 +588,45 @@ export async function runGmailSync(
     }
 
     if (usedFullList) {
-      threadIds = await listAllThreadIds(gmail);
+      threadIds = await listContactThreadIds(
+        gmail,
+        personRows.map((person) => person.email),
+        addresses,
+        budget,
+      );
     }
 
+    const skipThreadIds = usedFullList
+      ? await storedGmailThreadIds(db, mailbox)
+      : new Set<string>();
+
     for (const threadId of threadIds) {
+      if (skipThreadIds.has(threadId)) {
+        continue;
+      }
       await processGmailThread(gmail, db, {
         mailbox,
         threadId,
         people: personRows,
         actor,
         mailboxAddresses: addresses,
+        budget,
       });
     }
 
-    const profile = await gmail.users.getProfile({ userId: "me" });
-    await markSyncOk(db, mailbox, profile.data.historyId ?? null);
+    const profile = await callGmail(
+      async () => {
+        const response = await gmail.users.getProfile({ userId: "me" });
+        return response.data;
+      },
+      budget,
+    );
+    await markSyncOk(db, mailbox, profile.historyId ?? null);
   } catch (err) {
+    if (err instanceof GmailQuotaPausedError) {
+      await markSyncError(db, mailbox, err.message);
+      return;
+    }
     const message = err instanceof Error ? err.message : "Gmail sync failed";
     await markSyncError(db, mailbox, message);
     throw err;

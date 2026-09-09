@@ -2,7 +2,6 @@ import {
   CONFIGURED_MAILBOXES,
   canConnectMailbox,
   isConfiguredMailbox,
-  googleCallbackQuerySchema,
   googleStartResponseSchema,
   mailboxConnectionListResponseSchema,
   mailboxEmailFor,
@@ -15,15 +14,9 @@ import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { mailboxConnections } from "@realm-labs/db";
 import { eq } from "drizzle-orm";
 import { googleConfigured } from "../env.js";
-import {
-  googleMailboxUrl,
-  mailboxOauthErrorRedirect,
-  mailboxOauthSuccessRedirect,
-} from "../lib/google.js";
+import { googleMailboxUrl } from "../lib/google.js";
 import {
   MAILBOX_OAUTH_COOKIE,
-  completeMailboxOAuth,
-  decodeMailboxState,
   encodeMailboxState,
 } from "../lib/mailbox-oauth.js";
 import { removeMailboxSync } from "../lib/queues.js";
@@ -116,93 +109,6 @@ export const mailboxRoutes: FastifyPluginAsyncZod = async (app) => {
       });
 
       return { url: googleMailboxUrl(app.env, state, req.params.mailbox) };
-    },
-  );
-
-  app.get(
-    "/mailboxes/google/callback",
-    {
-      schema: {
-        querystring: googleCallbackQuerySchema,
-      },
-    },
-    async (req, reply) => {
-      const actor = req.user;
-      if (!actor) {
-        return reply.redirect(
-          mailboxOauthErrorRedirect(
-            app.env.WEB_ORIGIN,
-            "FORBIDDEN",
-            "You cannot connect this mailbox",
-          ),
-        );
-      }
-
-      if (!googleConfigured(app.env)) {
-        return reply.redirect(
-          mailboxOauthErrorRedirect(
-            app.env.WEB_ORIGIN,
-            "GOOGLE_NOT_CONFIGURED",
-            "Google OAuth is not configured",
-          ),
-        );
-      }
-
-      const query = req.query;
-      if (query.error || !query.code) {
-        return reply.redirect(
-          mailboxOauthErrorRedirect(
-            app.env.WEB_ORIGIN,
-            "OAUTH_ERROR",
-            query.error ?? "Missing authorization code",
-          ),
-        );
-      }
-
-      const expectedState = req.cookies[MAILBOX_OAUTH_COOKIE];
-      if (!expectedState || !query.state || expectedState !== query.state) {
-        return reply.redirect(
-          mailboxOauthErrorRedirect(
-            app.env.WEB_ORIGIN,
-            "OAUTH_ERROR",
-            "Invalid OAuth state",
-          ),
-        );
-      }
-
-      const mailbox = decodeMailboxState(query.state);
-      reply.clearCookie(MAILBOX_OAUTH_COOKIE, { path: "/" });
-      if (!mailbox) {
-        return reply.redirect(
-          mailboxOauthErrorRedirect(
-            app.env.WEB_ORIGIN,
-            "OAUTH_ERROR",
-            "Invalid OAuth state",
-          ),
-        );
-      }
-
-      const result = await completeMailboxOAuth({
-        db: app.db,
-        env: app.env,
-        queues: app.queues,
-        actor,
-        mailbox,
-        code: query.code,
-        onEnqueueError: (err) => {
-          req.log.error({ err }, "failed to enqueue mailbox sync");
-        },
-      });
-      if (!result.ok) {
-        return reply.redirect(
-          mailboxOauthErrorRedirect(
-            app.env.WEB_ORIGIN,
-            result.code,
-            result.message,
-          ),
-        );
-      }
-      return reply.redirect(mailboxOauthSuccessRedirect(app.env.WEB_ORIGIN));
     },
   );
 

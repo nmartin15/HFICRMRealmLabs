@@ -29,8 +29,8 @@ describe("googleAuthErrorMessage", () => {
     expect(
       googleMailboxRedirectUri({
         GOOGLE_REDIRECT_URI:
-          "http://localhost:3000/api/proxy/auth/google/callback",
+          "http://localhost:3000/api/auth/google/callback",
       }),
-    ).toBe("http://localhost:3000/api/proxy/auth/google/callback");
+    ).toBe("http://localhost:3000/api/auth/google/callback");
   });
 });

@@ -51,20 +51,6 @@ export const personSchema = z.object({
 });
 export type Person = z.infer<typeof personSchema>;
 
-export const personInsertSchema = personSchema
-  .omit({
-    id: true,
-    createdAt: true,
-    updatedAt: true,
-    deletedAt: true,
-  })
-  .extend({
-    budgetQualified: budgetQualifiedSchema.default("unknown"),
-    doNotContact: z.boolean().default(false),
-    needsReview: z.boolean().default(false),
-  });
-export type PersonInsert = z.infer<typeof personInsertSchema>;
-
 export const personListResponseSchema = z.object({
   data: z.array(personSchema),
 });

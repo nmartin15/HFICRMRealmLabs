@@ -3,12 +3,14 @@ import {
   buildHomeTodos,
   canViewCard,
   canViewMeeting,
+  canViewOperatorTask,
   emailThreadSchema,
   homeCounts,
   homeSnapshotResponseSchema,
   isIncubatorWaitingStage,
   isWithinUtcBounds,
   meetingDigestPersonSchema,
+  operatorTasksQuerySchema,
   todayBoundsUtc,
   zonedIsoDate,
   type HomeCallInput,
@@ -69,6 +71,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
     "/home",
     {
       schema: {
+        querystring: operatorTasksQuerySchema,
         response: { 200: homeSnapshotResponseSchema },
       },
     },
@@ -204,7 +207,18 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           .orderBy(asc(people.lastName), asc(people.firstName)),
       ]);
 
+      const includeAllOperators =
+        user.role === "admin" && req.query.operators === "all";
+      const visibleTask = (createdBy: string) =>
+        canViewOperatorTask({
+          role: user.role,
+          viewerId: user.id,
+          createdBy,
+          includeAllOperators,
+        });
+
       const leftoverMeetings: HomeScheduleItem[] = leftoverRows
+        .filter((row) => visibleTask(row.task.createdBy))
         .filter(
           (row) =>
             row.task.dueAt.getTime() < today.start.getTime() ||
@@ -217,10 +231,15 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         )
         .map(toScheduleItem);
 
-      const todayMeetings: HomeScheduleItem[] = todayMeetingRows.map(toScheduleItem);
+      const todayMeetings: HomeScheduleItem[] = todayMeetingRows
+        .filter((row) => visibleTask(row.task.createdBy))
+        .map(toScheduleItem);
 
       const skipCallPersonIds = new Set<string>();
       for (const meeting of upcomingMeetingRows) {
+        if (!visibleTask(meeting.createdBy)) {
+          continue;
+        }
         skipCallPersonIds.add(meeting.personId);
       }
       for (const item of leftoverMeetings) {
@@ -240,6 +259,9 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
       const todayEmailTasks: HomeScheduleItem[] = [];
       const openTasks: HomeOpenTaskInput[] = [];
       for (const row of openTaskRows) {
+        if (!visibleTask(row.task.createdBy)) {
+          continue;
+        }
         if (row.task.kind === "email" && isWithinUtcBounds(row.task.dueAt, today)) {
           todayEmailTasks.push(toScheduleItem(row));
           continue;

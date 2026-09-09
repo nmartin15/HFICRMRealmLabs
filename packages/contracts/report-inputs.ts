@@ -13,13 +13,6 @@ export const reportInputSchema = z.object({
 });
 export type ReportInput = z.infer<typeof reportInputSchema>;
 
-export const reportInputInsertSchema = reportInputSchema.omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-export type ReportInputInsert = z.infer<typeof reportInputInsertSchema>;
-
 export const reportInputCreateBodySchema = reportInputSchema.omit({
   id: true,
   createdBy: true,

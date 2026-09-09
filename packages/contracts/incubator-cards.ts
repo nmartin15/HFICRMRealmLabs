@@ -25,13 +25,6 @@ export const incubatorCardSchema = z.object({
 });
 export type IncubatorCard = z.infer<typeof incubatorCardSchema>;
 
-export const incubatorCardInsertSchema = incubatorCardSchema.omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-export type IncubatorCardInsert = z.infer<typeof incubatorCardInsertSchema>;
-
 export const incubatorCardIdParamsSchema = z.object({
   id: uuidSchema,
 });

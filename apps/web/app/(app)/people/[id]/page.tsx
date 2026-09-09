@@ -36,6 +36,7 @@ import {
   toDatetimeLocalValue,
 } from "@/lib/format";
 import { isTypingTarget, useListNavigation } from "@/hooks/use-list-navigation";
+import { useMe } from "@/hooks/use-me";
 import { CompleteTaskForm } from "@/components/complete-task-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -95,6 +96,8 @@ function allowedResume(file: File): boolean {
 export default function PersonRecordPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const { user } = useMe();
+  const [includeAllOperators, setIncludeAllOperators] = useState(false);
   const [detail, setDetail] = useState<PersonDetailResponse | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
@@ -112,15 +115,17 @@ export default function PersonRecordPage() {
   const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const operators =
+      user?.role === "admin" && includeAllOperators ? "all" : "mine";
     const [personRes, userRes] = await Promise.all([
-      api<PersonDetailResponse>(`/people/${id}`),
+      api<PersonDetailResponse>(`/people/${id}?operators=${operators}`),
       api<UserListResponse>("/users"),
     ]);
     setDetail(personRes);
     setPersonNotes(personRes.person.notes ?? "");
     setUsers(userRes.data);
     return personRes;
-  }, [id]);
+  }, [id, includeAllOperators, user?.role]);
 
   useEffect(() => {
     void load().catch((err: unknown) => {
@@ -601,7 +606,21 @@ export default function PersonRecordPage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-medium">Tasks</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-medium">Tasks</h2>
+          {user?.role === "admin" ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setIncludeAllOperators((current) => !current)}
+            >
+              {includeAllOperators ? "Showing all operators" : "Mine only"}
+            </Button>
+          ) : (
+            <p className="text-xs text-muted-foreground">Your tasks only</p>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground">
           Type, due date, and notes stay editable after save. Each change
           is recorded on the timeline.
