@@ -65,6 +65,10 @@ export function canConnectMailbox(input: {
   );
 }
 
+/**
+ * Home snapshot only. Contact-record tasks are shared so operators do not
+ * duplicate outreach.
+ */
 export function canViewOperatorTask(input: {
   role: UserRole;
   viewerId: string;

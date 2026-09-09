@@ -36,7 +36,6 @@ import {
   toDatetimeLocalValue,
 } from "@/lib/format";
 import { isTypingTarget, useListNavigation } from "@/hooks/use-list-navigation";
-import { useMe } from "@/hooks/use-me";
 import { CompleteTaskForm } from "@/components/complete-task-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,11 +92,13 @@ function allowedResume(file: File): boolean {
   return /\.(pdf|docx?)$/i.test(file.name);
 }
 
+function taskOwnerLabel(operators: User[], createdBy: string): string {
+  return operators.find((row) => row.id === createdBy)?.name ?? "";
+}
+
 export default function PersonRecordPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
-  const { user } = useMe();
-  const [includeAllOperators, setIncludeAllOperators] = useState(false);
   const [detail, setDetail] = useState<PersonDetailResponse | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
@@ -115,17 +116,15 @@ export default function PersonRecordPage() {
   const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const operators =
-      user?.role === "admin" && includeAllOperators ? "all" : "mine";
     const [personRes, userRes] = await Promise.all([
-      api<PersonDetailResponse>(`/people/${id}?operators=${operators}`),
+      api<PersonDetailResponse>(`/people/${id}`),
       api<UserListResponse>("/users"),
     ]);
     setDetail(personRes);
     setPersonNotes(personRes.person.notes ?? "");
     setUsers(userRes.data);
     return personRes;
-  }, [id, includeAllOperators, user?.role]);
+  }, [id]);
 
   useEffect(() => {
     void load().catch((err: unknown) => {
@@ -606,22 +605,9 @@ export default function PersonRecordPage() {
       </section>
 
       <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-medium">Tasks</h2>
-          {user?.role === "admin" ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => setIncludeAllOperators((current) => !current)}
-            >
-              {includeAllOperators ? "Showing all operators" : "Mine only"}
-            </Button>
-          ) : (
-            <p className="text-xs text-muted-foreground">Your tasks only</p>
-          )}
-        </div>
+        <h2 className="text-sm font-medium">Tasks</h2>
         <p className="text-xs text-muted-foreground">
+          Both operators see every task on this contact. Home stays mine-only.
           Type, due date, and notes stay editable after save. Each change
           is recorded on the timeline.
           I finished this closes it after you actually did the work.
@@ -642,6 +628,7 @@ export default function PersonRecordPage() {
               });
               const copy = taskGuideCopy(guide, TASK_KIND_LABELS[task.kind], task);
               const otherOpen = openTasks.filter((row) => row.id !== task.id).length;
+              const owner = taskOwnerLabel(users, task.createdBy);
               return (
               <li key={task.id} className="space-y-2 px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -663,6 +650,7 @@ export default function PersonRecordPage() {
                       </span>
                       {TASK_KIND_LABELS[task.kind]} · due{" "}
                       {formatDateTime(task.dueAt)}
+                      {owner ? ` · ${owner}` : ""}
                     </p>
                     <span className="mt-0.5 block text-xs text-muted-foreground">
                       {copy.hint}
@@ -826,12 +814,14 @@ export default function PersonRecordPage() {
             <ul className="divide-y border-t">
               {closedTasks.map((task) => {
                 const audit = completionAudit(task.id, timeline, users);
+                const owner = taskOwnerLabel(users, task.createdBy);
                 return (
                 <li key={task.id} className="space-y-2 px-3 py-2 text-sm">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                   {TASK_KIND_LABELS[task.kind]} · {task.status} · due{" "}
                   {formatDateTime(task.dueAt)}
+                  {owner ? ` · ${owner}` : ""}
                   {audit ? (
                     <span className="block text-xs text-muted-foreground">
                       Completed {formatDateTime(audit.when)} · {audit.who}

@@ -18,6 +18,7 @@ const PUBLIC_API_PATHS = new Set([
   "/api/auth/providers",
   "/api/auth/google",
   "/api/auth/google/callback",
+  "/api/proxy/auth/google/callback",
 ]);
 
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;

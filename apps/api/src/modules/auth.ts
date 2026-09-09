@@ -74,8 +74,12 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
-  app.get(
+  for (const callbackPath of [
     "/auth/google/callback",
+    "/proxy/auth/google/callback",
+  ] as const) {
+  app.get(
+    callbackPath,
     {
       schema: {
         querystring: googleCallbackQuerySchema,
@@ -83,14 +87,14 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (req, reply) => {
       if (!googleConfigured(app.env)) {
-      return reply.redirect(
-        oauthErrorRedirect(
-          app.env.WEB_ORIGIN,
-          "GOOGLE_NOT_CONFIGURED",
-          "Google OAuth is not configured",
-        ),
-      );
-    }
+        return reply.redirect(
+          oauthErrorRedirect(
+            app.env.WEB_ORIGIN,
+            "GOOGLE_NOT_CONFIGURED",
+            "Google OAuth is not configured",
+          ),
+        );
+      }
 
     const query = req.query;
     if (query.error || !query.code) {
@@ -238,6 +242,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       );
     }
   });
+  }
 
   app.post(
     "/auth/logout",

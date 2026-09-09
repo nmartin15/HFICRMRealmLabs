@@ -183,7 +183,7 @@ describe("admin-only mutations", () => {
 });
 
 describe("operator task visibility", () => {
-  it("shows an operator only their own tasks", () => {
+  it("scopes Home to an operator's own tasks", () => {
     expect(
       canViewOperatorTask({
         role: "member",
@@ -202,7 +202,7 @@ describe("operator task visibility", () => {
     ).toBe(true);
   });
 
-  it("lets admin include the other operator's tasks", () => {
+  it("lets admin include the other operator's tasks on Home", () => {
     expect(
       canViewOperatorTask({
         role: "admin",
