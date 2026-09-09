@@ -762,6 +762,36 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         personDeleted: Boolean(row.deletedAt),
         otherOpenTaskCount,
       });
+      // #region agent log
+      {
+        const payload = {
+          sessionId: "126ed8",
+          runId: "pre-fix",
+          hypothesisId: "C",
+          location: "apps/api/src/modules/people.ts:complete",
+          message: "planCompleteTask result",
+          data: {
+            currentStatus: current.status,
+            currentKind: current.kind,
+            otherOpenTaskCount,
+            hasBodyNext: Boolean(req.body.next),
+            planOk: plan.ok,
+            planStatus: plan.ok ? plan.status : plan.code,
+            willCreateFollowUp: plan.ok ? Boolean(plan.next) : false,
+          },
+          timestamp: Date.now(),
+        };
+        fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "126ed8",
+          },
+          body: JSON.stringify(payload),
+        }).catch(() => {});
+        req.log.info(payload.data, "task-complete-debug");
+      }
+      // #endregion
       if (!plan.ok) {
         throw httpError(plan.status, plan.code, plan.message);
       }

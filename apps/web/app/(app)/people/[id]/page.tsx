@@ -226,12 +226,67 @@ export default function PersonRecordPage() {
   async function completeTask(taskId: string, body: CompleteTaskBody) {
     setError("");
     try {
+      // #region agent log
+      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "126ed8",
+        },
+        body: JSON.stringify({
+          sessionId: "126ed8",
+          runId: "pre-fix",
+          hypothesisId: "B",
+          location: "apps/web/app/(app)/people/[id]/page.tsx:completeTask",
+          message: "complete task submitted",
+          data: {
+            hasNext: Boolean(body.next),
+            nextKind: body.next?.kind ?? null,
+            hasOutcome: Boolean(body.outcome),
+            openBefore: detail?.tasks.filter((task) => task.status === "open")
+              .length ?? 0,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       await api<Task>(`/people/${id}/tasks/${taskId}/complete`, {
         method: "POST",
         body: JSON.stringify(body),
       });
       setCompletingId(null);
       const nextDetail = await load();
+      const stillOpen = nextDetail.tasks.filter(
+        (task) => task.status === "open",
+      );
+      const completedStillOpen = stillOpen.some((task) => task.id === taskId);
+      // #region agent log
+      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "126ed8",
+        },
+        body: JSON.stringify({
+          sessionId: "126ed8",
+          runId: "pre-fix",
+          hypothesisId: "D",
+          location: "apps/web/app/(app)/people/[id]/page.tsx:completeTask-after",
+          message: "contact tasks after complete",
+          data: {
+            completedStillOpen,
+            openAfter: stillOpen.length,
+            closedAfter: nextDetail.tasks.filter((task) => task.status !== "open")
+              .length,
+            timelineCount: nextDetail.timeline.length,
+            newestWhat:
+              nextDetail.timeline.find((item) => item.kind === "activity")
+                ?.activity.payload.what ?? null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (body.next && body.next.kind !== "dnc") {
         const followUp = [...nextDetail.tasks]
           .filter((task) => task.status === "open")
@@ -243,6 +298,26 @@ export default function PersonRecordPage() {
         setExpandedTaskId(null);
       }
     } catch (err) {
+      // #region agent log
+      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "126ed8",
+        },
+        body: JSON.stringify({
+          sessionId: "126ed8",
+          runId: "pre-fix",
+          hypothesisId: "C",
+          location: "apps/web/app/(app)/people/[id]/page.tsx:completeTask-error",
+          message: "complete task failed",
+          data: {
+            error: err instanceof Error ? err.message : "unknown",
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setError(err instanceof Error ? err.message : "Failed to complete task");
     }
   }
@@ -687,6 +762,32 @@ export default function PersonRecordPage() {
                         setRemovingId(null);
                         openTask(task);
                         setCompletingId(task.id);
+                        // #region agent log
+                        fetch(
+                          "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
+                          {
+                            method: "POST",
+                            headers: {
+                              "Content-Type": "application/json",
+                              "X-Debug-Session-Id": "126ed8",
+                            },
+                            body: JSON.stringify({
+                              sessionId: "126ed8",
+                              runId: "pre-fix",
+                              hypothesisId: "A",
+                              location:
+                                "apps/web/app/(app)/people/[id]/page.tsx:finished-click",
+                              message: "I finished this clicked",
+                              data: {
+                                otherOpen,
+                                kind: task.kind,
+                                status: task.status,
+                              },
+                              timestamp: Date.now(),
+                            }),
+                          },
+                        ).catch(() => {});
+                        // #endregion
                       }}
                     >
                       I finished this
