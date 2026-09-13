@@ -25,6 +25,7 @@ import {
   WEBSITE_INTAKE_ACTOR,
   isWebsiteLeadHoneypot,
   planWebsiteLead,
+  shouldVerifyFormIntakeEmail,
   todayIsoInDisplayZone,
   websiteLeadBodySchema,
   websiteLeadResponseSchema,
@@ -35,11 +36,15 @@ import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { eq } from "drizzle-orm";
 import {
   allocationCards,
+  findPersonByEmail,
   people,
   type Database,
 } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
+import { verifyFormEmailWithKickbox } from "../lib/kickbox.js";
+import { enqueuePersonScore } from "../lib/score-enqueue.js";
 import { secretsEqual } from "../lib/secrets.js";
+import { grantPersonConsent, suppressionReasonForEmail } from "../lib/suppression.js";
 import { httpError } from "../plugins/error.js";
 
 const RATE_LIMIT_MAX = 10;
@@ -93,12 +98,7 @@ function setWebsiteCorsHeaders(
 }
 
 async function personByEmail(db: Database, email: string) {
-  const rows = await db
-    .select()
-    .from(people)
-    .where(eq(people.email, email))
-    .limit(1);
-  const person = rows[0];
+  const person = await findPersonByEmail(db, email);
   if (!person) {
     return null;
   }
@@ -165,6 +165,13 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const matched = await personByEmail(app.db, body.email);
+      const suppressed = Boolean(
+        await suppressionReasonForEmail(
+          app.db,
+          body.email,
+          app.env.EMAIL_HASH_KEY,
+        ),
+      );
       const plan = planWebsiteLead({
         name: body.name,
         message: body.message,
@@ -179,10 +186,15 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
             }
           : null,
         existingNotes: matched?.person.notes ?? null,
+        suppressed,
       });
 
       if (!plan.ok) {
         throw httpError(plan.status, plan.code, plan.message);
+      }
+
+      if (plan.action === "ignored") {
+        return reply.code(200).send({ status: "updated" });
       }
 
       const when = new Date();
@@ -192,6 +204,15 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
       };
 
       if (plan.action === "create") {
+        const kickboxResult = shouldVerifyFormIntakeEmail({
+          isNewPerson: true,
+          alreadyVerified: false,
+        })
+          ? await verifyFormEmailWithKickbox(
+              app.env.KICKBOX_API_KEY,
+              body.email,
+            )
+          : null;
         const result = await app.db.transaction(async (tx) => {
           const typedTx = tx as unknown as Database;
           const [created] = await tx
@@ -205,6 +226,8 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
               notes: plan.notes,
               programTrack: "allocation",
               programInterest: body.programInterest,
+              emailVerificationResult: kickboxResult,
+              emailVerifiedAt: kickboxResult ? when : null,
             })
             .returning();
           if (!created) {
@@ -229,6 +252,7 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
                 email: body.email,
                 programInterest: body.programInterest,
                 source: "website",
+                emailVerificationResult: kickboxResult,
               },
             },
           });
@@ -246,7 +270,21 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
             },
           });
 
+          await grantPersonConsent(typedTx, {
+            personId: created.id,
+            email: body.email,
+            keyHex: app.env.EMAIL_HASH_KEY,
+            channel: "inquiry",
+            source: "website_form",
+            occurredAt: when,
+          });
+
           return created.id;
+        });
+
+        await enqueuePersonScore(app.queues, {
+          personId: result,
+          trigger: "form",
         });
 
         return reply.code(201).send({ status: "created", id: result });
@@ -311,6 +349,11 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
             },
           },
         });
+      });
+
+      await enqueuePersonScore(app.queues, {
+        personId: plan.personId,
+        trigger: "form",
       });
 
       return reply.code(200).send({ status: "updated" });

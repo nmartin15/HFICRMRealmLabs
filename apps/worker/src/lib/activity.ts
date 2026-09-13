@@ -12,7 +12,7 @@ export type ActivityMutationPayload = {
 export async function writeActivity(
   db: Database,
   input: {
-    personId: string;
+    personId: string | null;
     userId: string | null;
     type: ActivityType;
     payload: ActivityMutationPayload;

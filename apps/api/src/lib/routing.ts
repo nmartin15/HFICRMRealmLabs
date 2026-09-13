@@ -14,14 +14,15 @@ import {
 } from "@realm-labs/db";
 import type { AuthedUser } from "../plugins/auth.js";
 import { httpError } from "../plugins/error.js";
-import { writeActivity } from "./activity.js";
+import { writeActivity } from "../lib/activity.js";
+import { writeSuppression } from "../lib/suppression.js";
 
 export async function applyDecision(
   db: Database,
   actor: AuthedUser,
   cardId: string,
   body: DecideBody,
-  extras?: { noCallAppLink?: boolean },
+  extras?: { noCallAppLink?: boolean; emailHashKey: string },
 ): Promise<DecideSuccess> {
   const parsed = decideBodySchema.parse(body);
   const cardRows = await db
@@ -54,6 +55,29 @@ export async function applyDecision(
   const when = new Date();
   try {
     await db.transaction(async (tx) => {
+      const typedTx = tx as unknown as Database;
+
+      if (result.suppression) {
+        const personRows = await tx
+          .select({ email: people.email })
+          .from(people)
+          .where(eq(people.id, card.personId))
+          .limit(1);
+        const email = personRows[0]?.email;
+        if (email && extras?.emailHashKey) {
+          await writeSuppression(typedTx, {
+            email,
+            keyHex: extras.emailHashKey,
+            reason: result.suppression.reason,
+            source: "operator",
+            occurredAt: when,
+            createdBy: actor.id,
+            actorEmail: actor.email,
+            personId: card.personId,
+          });
+        }
+      }
+
       await tx
         .update(allocationCards)
         .set({
@@ -84,8 +108,6 @@ export async function applyDecision(
           routedAt: when,
         });
       }
-
-      const typedTx = tx as unknown as Database;
 
       if (card.stage !== result.allocation.stage) {
         await writeActivity(typedTx, {

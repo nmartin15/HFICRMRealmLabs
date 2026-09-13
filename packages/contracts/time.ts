@@ -68,6 +68,31 @@ export function zonedLocalToUtc(
   return new Date(utcGuess - timeZoneOffsetMs(first, timeZone));
 }
 
+const DATETIME_LOCAL =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
+
+/** Parse an `<input type="datetime-local">` value as `timeZone` wall time. */
+export function zonedDatetimeLocalToUtc(
+  value: string,
+  timeZone: string = DISPLAY_TIME_ZONE,
+): Date {
+  const match = DATETIME_LOCAL.exec(value);
+  if (!match) {
+    throw new Error("Invalid datetime-local value");
+  }
+  return zonedLocalToUtc(
+    {
+      year: Number(match[1]),
+      month: Number(match[2]),
+      day: Number(match[3]),
+    },
+    timeZone,
+    Number(match[4]),
+    Number(match[5]),
+    Number(match[6] ?? 0),
+  );
+}
+
 function addCalendarDays(ymd: CalendarYmd, days: number): CalendarYmd {
   const utc = new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day + days));
   return {

@@ -72,7 +72,7 @@ export const operatorTasksQuerySchema = z.object({
 export type OperatorTasksQuery = z.infer<typeof operatorTasksQuerySchema>;
 
 export const taskIdParamsSchema = z.object({
-  personId: uuidSchema,
+  id: uuidSchema,
   taskId: uuidSchema,
 });
 export type TaskIdParams = z.infer<typeof taskIdParamsSchema>;
@@ -270,7 +270,7 @@ export function planCompleteTask(input: {
   }
 
   const otherOpenTaskCount = input.otherOpenTaskCount ?? 0;
-  if (otherOpenTaskCount > 0) {
+  if (otherOpenTaskCount > 0 || !input.next) {
     return {
       ok: true,
       notes,
@@ -279,14 +279,6 @@ export function planCompleteTask(input: {
       outcome,
       next: null,
     };
-  }
-
-  if (!input.next) {
-    return fail(
-      400,
-      "FOLLOW_UP_REQUIRED",
-      "Closing a task requires a follow-up task",
-    );
   }
 
   const nextNotes = notesOrNull(input.next.notes);

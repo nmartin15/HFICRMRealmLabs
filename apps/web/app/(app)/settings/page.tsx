@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type {
   GoogleStartResponse,
@@ -12,7 +13,7 @@ import type {
   UserListResponse,
   UserRole,
 } from "@realm-labs/contracts";
-import { canConnectMailbox } from "@realm-labs/contracts";
+import { canConnectMailbox, canInspectScoring } from "@realm-labs/contracts";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useListNavigation } from "@/hooks/use-list-navigation";
@@ -185,6 +186,16 @@ function SettingsForm() {
         <p className="text-sm text-muted-foreground">
           j/k to move between rows, esc to leave a field.
         </p>
+        {user && canInspectScoring(user.role) ? (
+          <p className="mt-2 flex flex-wrap gap-3 text-sm">
+            <Link href="/settings/scoring" className="hover:underline">
+              Scoring
+            </Link>
+            <Link href="/settings/suppressions" className="hover:underline">
+              Suppressions
+            </Link>
+          </p>
+        ) : null}
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}

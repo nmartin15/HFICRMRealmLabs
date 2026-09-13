@@ -13,6 +13,7 @@ import { eq } from "drizzle-orm";
 import type { Env } from "../env.js";
 import { exchangeGoogleMailboxCode } from "./google.js";
 import { enqueueMailboxSync, type SyncQueues } from "./queues.js";
+import { writeActivity } from "./activity.js";
 import type { AuthedUser } from "../plugins/auth.js";
 
 export const MAILBOX_OAUTH_COOKIE = "rl_mailbox_oauth_state";
@@ -130,6 +131,23 @@ export async function completeMailboxOAuth(input: {
         connectedAt: now,
       });
     }
+
+    await writeActivity(input.db, {
+      personId: null,
+      userId: input.actor.id,
+      type: "field_change",
+      payload: {
+        who: { id: input.actor.id, email: input.actor.email },
+        what: existing[0] ? "mailbox.reconnect" : "mailbox.connect",
+        when: now.toISOString(),
+        before: existing[0] ? { mailbox: input.mailbox, connected: true } : null,
+        after: {
+          mailbox: input.mailbox,
+          email,
+          connected: true,
+        },
+      },
+    });
 
     try {
       await enqueueMailboxSync(input.queues, input.mailbox);

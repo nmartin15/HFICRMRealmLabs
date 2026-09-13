@@ -7,12 +7,17 @@ import {
   type AllocationStage,
   type BudgetQualified,
   type IncubatorStage,
+  LEAD_TEMP_TO_OPERATOR_WARMTH,
   type LeadTemp,
+  type OperatorWarmthLevel,
   type PersonSource,
+  type SuppressionReason,
   type TaskKind,
   type TaskStatus,
 } from "./enums";
+import { canonicalEmail } from "./email-matching";
 import { DISPLAY_TIME_ZONE, zonedLocalToUtc, type CalendarYmd } from "./time";
+import { blocksImportUpdate, blocksPersonCreate } from "./suppression";
 
 export const IMPORT_HEADERS = [
   "name",
@@ -787,6 +792,7 @@ export function previewImportCounts(
 export function assignImportActions(
   rows: ImportMappedRow[],
   existing: readonly ImportExistingPerson[],
+  suppressions: ReadonlyMap<string, SuppressionReason> = new Map(),
 ): ImportPreviewRow[] {
   const byEmail = new Map(
     existing.map((person) => [person.email.toLowerCase(), person] as const),
@@ -805,6 +811,35 @@ export function assignImportActions(
         name,
         existingPersonId: null,
         errors: errors.length > 0 ? errors : ["Valid email is required"],
+      };
+    }
+
+    const canonical = canonicalEmail(email);
+    const suppressionReason = suppressions.get(canonical) ?? null;
+    const found = byEmail.get(email);
+    const living = Boolean(found && !found.deletedAt);
+
+    if (blocksPersonCreate(suppressionReason) && !living) {
+      errors.push("Email is suppressed");
+      return {
+        rowNumber: row.rowNumber,
+        action: "skip" as const,
+        email,
+        name,
+        existingPersonId: found?.id ?? null,
+        errors,
+      };
+    }
+
+    if (living && blocksImportUpdate(suppressionReason)) {
+      errors.push("Email is suppressed");
+      return {
+        rowNumber: row.rowNumber,
+        action: "skip" as const,
+        email,
+        name,
+        existingPersonId: found?.id ?? null,
+        errors,
       };
     }
 
@@ -832,7 +867,6 @@ export function assignImportActions(
     }
 
     seen.add(email);
-    const found = byEmail.get(email);
     if (found?.deletedAt) {
       return {
         rowNumber: row.rowNumber,
@@ -1008,6 +1042,28 @@ export function fillBlankPersonFields(
       existing.budgetQualified === "unknown"
         ? incoming.budgetQualified
         : existing.budgetQualified,
+  };
+}
+
+export function planImportLeadTemp(input: {
+  hasSnapshot: boolean;
+  existingLeadTemp: LeadTemp | null;
+  incomingLeadTemp: LeadTemp | null;
+}): { leadTemp: LeadTemp | null; warmth: OperatorWarmthLevel | null } {
+  if (input.hasSnapshot) {
+    return {
+      leadTemp: input.existingLeadTemp,
+      warmth: input.incomingLeadTemp
+        ? LEAD_TEMP_TO_OPERATOR_WARMTH[input.incomingLeadTemp]
+        : null,
+    };
+  }
+  return {
+    leadTemp:
+      input.existingLeadTemp === null
+        ? input.incomingLeadTemp
+        : input.existingLeadTemp,
+    warmth: null,
   };
 }
 

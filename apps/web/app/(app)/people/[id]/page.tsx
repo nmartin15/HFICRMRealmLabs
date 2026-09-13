@@ -1,15 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import type {
+  CampaignTagPayload,
   CompleteTaskBody,
   EmailMessageDirection,
   Person,
   PersonDetailResponse,
   PersonPatch,
   ProgramTrack,
+  OperatorWarmthLevel,
   Task,
   TaskKind,
   TimelineItem,
@@ -21,13 +23,19 @@ import {
   BUDGET_QUALIFIED_LABELS,
   INCUBATOR_STAGE_LABELS,
   LEAD_TEMP_LABELS,
+  OPERATOR_WARMTH_LABELS,
   PROGRAM_TRACK_LABELS,
+  SCORE_FORMULA_V1,
   TASK_KIND_LABELS,
+  canInspectScoring,
   classifyOpenTask,
   completedTaskIdFromPayload,
+  displayScoreBucket,
+  explainDisplayVsCampaign,
 } from "@realm-labs/contracts";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { activityActorLabel, activitySummary } from "@/lib/activity-summary";
+import { ScoreInspectPanel } from "@/components/score-inspect-panel";
 import {
   defaultTaskDueLocal,
   formatDate,
@@ -36,6 +44,7 @@ import {
   toDatetimeLocalValue,
 } from "@/lib/format";
 import { isTypingTarget, useListNavigation } from "@/hooks/use-list-navigation";
+import { useMe } from "@/hooks/use-me";
 import { CompleteTaskForm } from "@/components/complete-task-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +77,16 @@ const RESUME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
 
+function saveErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError && err.code === "ENGINE_OWNS_LEAD_TEMP") {
+    return err.message;
+  }
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  return fallback;
+}
+
 function boardLabel(board: NonNullable<PersonDetailResponse["board"]>): string {
   if (board.board === "incubator") {
     return `Incubator · ${INCUBATOR_STAGE_LABELS[board.stage]}`;
@@ -99,6 +118,7 @@ function taskOwnerLabel(operators: User[], createdBy: string): string {
 export default function PersonRecordPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const { user } = useMe();
   const [detail, setDetail] = useState<PersonDetailResponse | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
@@ -114,6 +134,7 @@ export default function PersonRecordPage() {
   const [saveHint, setSaveHint] = useState("");
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null);
+  const [releasingHot, setReleasingHot] = useState(false);
 
   const load = useCallback(async () => {
     const [personRes, userRes] = await Promise.all([
@@ -132,7 +153,7 @@ export default function PersonRecordPage() {
     });
   }, [load]);
 
-  const timeline = detail?.timeline ?? [];
+  const timeline = useMemo(() => detail?.timeline ?? [], [detail?.timeline]);
   const selected = useListNavigation(timeline.length);
 
   useEffect(() => {
@@ -163,6 +184,21 @@ export default function PersonRecordPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [expandedThreadId, selected, timeline]);
 
+  async function releaseHotSequence() {
+    setError("");
+    setReleasingHot(true);
+    try {
+      await api<CampaignTagPayload>(`/campaign-tags/${id}/release`, {
+        method: "POST",
+      });
+      await load();
+    } catch (err) {
+      setError(saveErrorMessage(err, "Failed to release sequence"));
+    } finally {
+      setReleasingHot(false);
+    }
+  }
+
   async function patch(body: PersonPatch) {
     setError("");
     try {
@@ -180,7 +216,22 @@ export default function PersonRecordPage() {
         await load();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save");
+      setError(saveErrorMessage(err, "Failed to save"));
+    }
+  }
+
+  async function setOperatorWarmth(level: OperatorWarmthLevel) {
+    setError("");
+    try {
+      await api(`/people/${id}/operator-temp`, {
+        method: "POST",
+        body: JSON.stringify({ level }),
+      });
+      setSaveHint("Judgment saved");
+      window.setTimeout(() => setSaveHint(""), 1500);
+      await load();
+    } catch (err) {
+      setError(saveErrorMessage(err, "Failed to save judgment"));
     }
   }
 
@@ -235,7 +286,7 @@ export default function PersonRecordPage() {
         },
         body: JSON.stringify({
           sessionId: "126ed8",
-          runId: "pre-fix",
+          runId: "post-fix",
           hypothesisId: "B",
           location: "apps/web/app/(app)/people/[id]/page.tsx:completeTask",
           message: "complete task submitted",
@@ -269,8 +320,8 @@ export default function PersonRecordPage() {
         },
         body: JSON.stringify({
           sessionId: "126ed8",
-          runId: "pre-fix",
-          hypothesisId: "D",
+          runId: "post-fix",
+          hypothesisId: "B",
           location: "apps/web/app/(app)/people/[id]/page.tsx:completeTask-after",
           message: "contact tasks after complete",
           data: {
@@ -279,6 +330,11 @@ export default function PersonRecordPage() {
             closedAfter: nextDetail.tasks.filter((task) => task.status !== "open")
               .length,
             timelineCount: nextDetail.timeline.length,
+            hasTaskComplete: nextDetail.timeline.some(
+              (item) =>
+                item.kind === "activity" &&
+                item.activity.payload.what === "task.complete",
+            ),
             newestWhat:
               nextDetail.timeline.find((item) => item.kind === "activity")
                 ?.activity.payload.what ?? null,
@@ -287,16 +343,9 @@ export default function PersonRecordPage() {
         }),
       }).catch(() => {});
       // #endregion
-      if (body.next && body.next.kind !== "dnc") {
-        const followUp = [...nextDetail.tasks]
-          .filter((task) => task.status === "open")
-          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-        if (followUp) {
-          openTask(followUp);
-        }
-      } else {
-        setExpandedTaskId(null);
-      }
+      setExpandedTaskId(null);
+      setSaveHint("Task closed");
+      window.setTimeout(() => setSaveHint(""), 1500);
     } catch (err) {
       // #region agent log
       fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
@@ -376,6 +425,17 @@ export default function PersonRecordPage() {
 
   const person = detail.person;
   const name = `${person.firstName} ${person.lastName}`;
+  const displayBucket =
+    person.score === null ? null : displayScoreBucket(person.score);
+  const scoreExplanation =
+    person.score !== null && person.leadTemp && displayBucket
+      ? explainDisplayVsCampaign({
+          score: person.score,
+          displayBucket,
+          campaignBucket: person.leadTemp,
+          hysteresis: SCORE_FORMULA_V1.hysteresis,
+        })
+      : null;
   const activityPayloads = timeline
     .filter(
       (item): item is Extract<TimelineItem, { kind: "activity" }> =>
@@ -437,6 +497,24 @@ export default function PersonRecordPage() {
           <p className="rounded-md bg-red-600 px-3 py-2 text-sm text-white">
             Do not contact
           </p>
+        ) : null}
+        {detail.campaignHold ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+            <p>Hot sequence waiting — no email until released</p>
+            {user?.role === "admin" ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={releasingHot}
+                onClick={() => void releaseHotSequence()}
+              >
+                Release
+              </Button>
+            ) : (
+              <p className="text-xs text-muted-foreground">Ask an admin to release</p>
+            )}
+          </div>
         ) : null}
         {person.needsReview ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
@@ -552,6 +630,31 @@ export default function PersonRecordPage() {
             </dd>
           </div>
           <div>
+            <dt className="text-xs text-muted-foreground">Score</dt>
+            <dd>
+              {person.score === null ? (
+                "—"
+              ) : (
+                <span>
+                  <span className="tabular-nums">{person.score}</span>
+                  <span className="text-muted-foreground">
+                    {displayBucket
+                      ? ` · display ${LEAD_TEMP_LABELS[displayBucket]}`
+                      : ""}
+                    {person.leadTemp
+                      ? ` · campaign ${LEAD_TEMP_LABELS[person.leadTemp]}`
+                      : ""}
+                  </span>
+                </span>
+              )}
+            </dd>
+          </div>
+          {scoreExplanation ? (
+            <div className="sm:col-span-2">
+              <p className="text-sm text-canary">{scoreExplanation}</p>
+            </div>
+          ) : null}
+          <div>
             <dt className="text-xs text-muted-foreground">Applied</dt>
             <dd>{person.appliedAt ? formatDate(person.appliedAt) : "—"}</dd>
           </div>
@@ -585,29 +688,67 @@ export default function PersonRecordPage() {
           </select>
         </div>
         <div className="space-y-1">
-          <Label htmlFor="leadTemp">Lead temp</Label>
-          <select
-            id="leadTemp"
-            className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
-            value={person.leadTemp ?? ""}
-            onChange={(event) =>
-              void patch({
-                leadTemp: event.target.value
-                  ? (event.target.value as NonNullable<Person["leadTemp"]>)
-                  : null,
-              })
-            }
-          >
-            <option value="">—</option>
-            {(Object.keys(LEAD_TEMP_LABELS) as Person["leadTemp"][]).map(
-              (value) =>
-                value ? (
+          <Label htmlFor="leadTemp">
+            {person.score === null ? "Lead temp" : "Operator judgment"}
+          </Label>
+          {person.score === null ? (
+            <select
+              id="leadTemp"
+              className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
+              value={person.leadTemp ?? ""}
+              onChange={(event) =>
+                void patch({
+                  leadTemp: event.target.value
+                    ? (event.target.value as NonNullable<Person["leadTemp"]>)
+                    : null,
+                })
+              }
+            >
+              <option value="">—</option>
+              {(Object.keys(LEAD_TEMP_LABELS) as Person["leadTemp"][]).map(
+                (value) =>
+                  value ? (
+                    <option key={value} value={value}>
+                      {LEAD_TEMP_LABELS[value]}
+                    </option>
+                  ) : null,
+              )}
+            </select>
+          ) : (
+            <>
+              {detail.scoreHoldSummary ? (
+                <p className="text-xs text-muted-foreground">
+                  {detail.scoreHoldSummary}
+                </p>
+              ) : null}
+              <select
+                id="leadTemp"
+                className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
+                defaultValue=""
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (!value) {
+                    return;
+                  }
+                  void setOperatorWarmth(value as OperatorWarmthLevel);
+                  event.currentTarget.value = "";
+                }}
+              >
+                <option value="">Set judgment…</option>
+                {(
+                  Object.keys(OPERATOR_WARMTH_LABELS) as OperatorWarmthLevel[]
+                ).map((value) => (
                   <option key={value} value={value}>
-                    {LEAD_TEMP_LABELS[value]}
+                    {OPERATOR_WARMTH_LABELS[value]}
                   </option>
-                ) : null,
-            )}
-          </select>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Skeptical lowers the score. Watch, pursue, and priority raise
+                it. This does not set campaign temp.
+              </p>
+            </>
+          )}
         </div>
         <div className="space-y-1">
           <Label htmlFor="budgetQualified">Budget qualified</Label>
@@ -679,14 +820,18 @@ export default function PersonRecordPage() {
         </div>
       </section>
 
+      {user && canInspectScoring(user.role) ? (
+        <ScoreInspectPanel personId={id} onChanged={() => void load()} />
+      ) : null}
+
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Tasks</h2>
         <p className="text-xs text-muted-foreground">
           Both operators see every task on this contact. Home stays mine-only.
           Type, due date, and notes stay editable after save. Each change
           is recorded on the timeline.
-          I finished this closes it after you actually did the work.
-          A next follow-up is asked only when this is the last open task.
+          I finished this closes the task and logs it on the timeline.
+          Add a new task if you still need a follow-up.
           {saveHint ? ` · ${saveHint}` : ""}
         </p>
         {openTasks.length === 0 ? (
@@ -714,9 +859,11 @@ export default function PersonRecordPage() {
                       if (completingId === task.id) {
                         return;
                       }
-                      expandedTaskId === task.id
-                        ? setExpandedTaskId(null)
-                        : openTask(task);
+                      if (expandedTaskId === task.id) {
+                        setExpandedTaskId(null);
+                        return;
+                      }
+                      openTask(task);
                     }}
                   >
                     <p>
@@ -760,8 +907,6 @@ export default function PersonRecordPage() {
                       variant="outline"
                       onClick={() => {
                         setRemovingId(null);
-                        openTask(task);
-                        setCompletingId(task.id);
                         // #region agent log
                         fetch(
                           "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
@@ -773,7 +918,7 @@ export default function PersonRecordPage() {
                             },
                             body: JSON.stringify({
                               sessionId: "126ed8",
-                              runId: "pre-fix",
+                              runId: "post-fix",
                               hypothesisId: "A",
                               location:
                                 "apps/web/app/(app)/people/[id]/page.tsx:finished-click",
@@ -782,12 +927,20 @@ export default function PersonRecordPage() {
                                 otherOpen,
                                 kind: task.kind,
                                 status: task.status,
+                                immediate:
+                                  task.kind !== "meeting" && task.kind !== "dnc",
                               },
                               timestamp: Date.now(),
                             }),
                           },
                         ).catch(() => {});
                         // #endregion
+                        if (task.kind === "meeting" || task.kind === "dnc") {
+                          openTask(task);
+                          setCompletingId(task.id);
+                          return;
+                        }
+                        void completeTask(task.id, {});
                       }}
                     >
                       I finished this
@@ -840,7 +993,7 @@ export default function PersonRecordPage() {
                 {completingId === task.id ? (
                   <CompleteTaskForm
                     task={task}
-                    requireFollowUp={otherOpen === 0}
+                    requireFollowUp={false}
                     guide={guide === "overdue" || guide === "follow-up" ? guide : "todo"}
                     onCancel={() => setCompletingId(null)}
                     onSubmit={(body) => void completeTask(task.id, body)}

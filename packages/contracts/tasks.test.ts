@@ -100,7 +100,7 @@ describe("planUpdateTask", () => {
 });
 
 describe("planCompleteTask", () => {
-  it("requires a follow-up unless DNC", () => {
+  it("closes a call without requiring a follow-up", () => {
     expect(
       planCompleteTask({
         currentKind: "call",
@@ -111,7 +111,7 @@ describe("planCompleteTask", () => {
         personDoNotContact: false,
         personDeleted: false,
       }),
-    ).toMatchObject({ ok: false, code: "FOLLOW_UP_REQUIRED" });
+    ).toMatchObject({ ok: true, status: "done", next: null });
   });
 
   it("closes DNC with notes and no next task", () => {
@@ -157,6 +157,20 @@ describe("planCompleteTask", () => {
     });
   });
 
+  it("closes a meeting without a follow-up when an outcome is set", () => {
+    expect(
+      planCompleteTask({
+        currentKind: "meeting",
+        currentStatus: "open",
+        notes: "Good call",
+        outcome: "held",
+        next: undefined,
+        personDoNotContact: false,
+        personDeleted: false,
+      }),
+    ).toMatchObject({ ok: true, status: "done", outcome: "held", next: null });
+  });
+
   it("requires a meeting outcome when closing a meeting task", () => {
     expect(
       planCompleteTask({
@@ -174,7 +188,7 @@ describe("planCompleteTask", () => {
     ).toMatchObject({ ok: false, code: "MEETING_OUTCOME_REQUIRED" });
   });
 
-  it("records held and still requires a follow-up", () => {
+  it("records held and can save an optional follow-up", () => {
     expect(
       planCompleteTask({
         currentKind: "meeting",

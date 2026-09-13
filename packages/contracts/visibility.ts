@@ -48,6 +48,10 @@ export function canDeletePerson(role: UserRole): boolean {
   return role === "admin";
 }
 
+export function canInspectScoring(role: UserRole): boolean {
+  return role === "admin";
+}
+
 export function canChangeUserRole(role: UserRole): boolean {
   return role === "admin";
 }

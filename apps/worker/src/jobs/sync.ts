@@ -1,4 +1,6 @@
 import {
+  alternateEmailToRecord,
+  calendarEventAttendeeAccepted,
   calendarSyncJobDataSchema,
   cancelledMeetingResolution,
   DISPLAY_TIME_ZONE,
@@ -6,6 +8,7 @@ import {
   extractGmailPlainText,
   gmailContactSearchQueries,
   gmailSyncJobDataSchema,
+  emailMessageDirection,
   isInboundReply,
   isConfiguredMailbox,
   mailboxEmails,
@@ -14,13 +17,17 @@ import {
   uniqueEmails,
   zonedLocalToUtc,
   type Mailbox,
+  type ScoreTrigger,
 } from "@realm-labs/contracts";
 import {
   decryptSecret,
   emailMessages,
   emailThreads,
+  listAlternateEmailsByPerson,
   mailboxConnections,
+  meetings,
   people,
+  personEmails,
   tasks,
   users,
   type Database,
@@ -29,6 +36,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { google, type calendar_v3, type gmail_v1 } from "googleapis";
 import type { Env } from "../env.js";
 import { writeActivity } from "../lib/activity.js";
+import { ingestExtractedText } from "../lib/signals.js";
 import {
   GmailQuotaPausedError,
   callGmail,
@@ -42,7 +50,9 @@ import {
 } from "../lib/stage-moves.js";
 
 type Actor = { id: string; email: string };
-type PersonEmail = { id: string; email: string };
+type PersonEmail = { id: string; email: string; emails: string[] };
+
+const CALENDAR_SYNC_LOOKBACK_MS = 400 * 24 * 60 * 60 * 1000;
 
 function headerValue(
   headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
@@ -74,7 +84,15 @@ async function loadPeople(db: Database): Promise<PersonEmail[]> {
     .select({ id: people.id, email: people.email })
     .from(people)
     .where(isNull(people.deletedAt));
-  return rows;
+  const alts = await listAlternateEmailsByPerson(
+    db,
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    email: row.email,
+    emails: uniqueEmails([row.email, ...(alts.get(row.id) ?? [])]),
+  }));
 }
 
 async function loadActor(db: Database, userId: string): Promise<Actor> {
@@ -257,6 +275,8 @@ async function upsertGmailThread(
     participantEmails: string[];
     personId: string | null;
     latestFrom: string | null;
+    latestToEmails: string[];
+    latestCcEmails: string[];
     messageCount: number;
     inReplyTo: string | null;
     people: PersonEmail[];
@@ -343,10 +363,13 @@ async function upsertGmailThread(
   if (
     isInboundReply({
       latestFrom: input.latestFrom,
-      personEmail: person.email,
+      personEmails: person.emails,
       messageCount: input.messageCount,
       inReplyTo: input.inReplyTo,
       mailboxAddresses: input.mailboxAddresses,
+      toEmails: input.latestToEmails,
+      ccEmails: input.latestCcEmails,
+      threadMatched: true,
     })
   ) {
     await maybeMoveOnInboundReply(db, {
@@ -415,6 +438,50 @@ async function upsertGmailMessages(
   }
 }
 
+async function rememberAlternateEmails(
+  db: Database,
+  person: PersonEmail,
+  messages: readonly {
+    fromEmail: string;
+    toEmails: string[];
+    ccEmails: string[];
+  }[],
+  mailboxAddresses: readonly string[],
+): Promise<void> {
+  for (const message of messages) {
+    const alt = alternateEmailToRecord({
+      fromEmail: message.fromEmail,
+      toEmails: message.toEmails,
+      ccEmails: message.ccEmails,
+      personEmails: person.emails,
+      mailboxAddresses,
+    });
+    if (!alt) {
+      continue;
+    }
+    const taken = await db
+      .select({ id: people.id })
+      .from(people)
+      .where(eq(people.email, alt))
+      .limit(1);
+    if (taken[0] && taken[0].id !== person.id) {
+      continue;
+    }
+    const inserted = await db
+      .insert(personEmails)
+      .values({
+        personId: person.id,
+        email: alt,
+        source: "thread",
+      })
+      .onConflictDoNothing({ target: personEmails.email })
+      .returning({ email: personEmails.email });
+    if (inserted[0]) {
+      person.emails = uniqueEmails([...person.emails, inserted[0].email]);
+    }
+  }
+}
+
 async function getGmailThread(
   gmail: gmail_v1.Gmail,
   threadId: string,
@@ -454,6 +521,11 @@ async function processGmailThread(
     actor: Actor;
     mailboxAddresses: readonly string[];
     budget: GmailQuotaBudget;
+    env: Env;
+    enqueueScore?: (input: {
+      personId: string;
+      trigger: Extract<ScoreTrigger, "inbound_email" | "inbound_reply">;
+    }) => Promise<void>;
   },
 ): Promise<void> {
   const data = await getGmailThread(
@@ -489,6 +561,12 @@ async function processGmailThread(
   const latestHeaders = latest.payload?.headers ?? [];
   const latestFrom =
     parseEmailAddresses(headerValue(latestHeaders, "From"))[0] ?? null;
+  const latestToEmails = uniqueEmails(
+    parseEmailAddresses(headerValue(latestHeaders, "To")),
+  );
+  const latestCcEmails = uniqueEmails(
+    parseEmailAddresses(headerValue(latestHeaders, "Cc")),
+  );
   const inReplyTo =
     headerValue(latestHeaders, "In-Reply-To") ||
     headerValue(latestHeaders, "References") ||
@@ -502,6 +580,10 @@ async function processGmailThread(
     input.mailboxAddresses,
   );
   if (!matched) {
+    return;
+  }
+  const person = input.people.find((row) => row.id === matched.id);
+  if (!person) {
     return;
   }
 
@@ -527,6 +609,8 @@ async function processGmailThread(
     participantEmails,
     personId: matched.id,
     latestFrom,
+    latestToEmails,
+    latestCcEmails,
     messageCount: bodies.length,
     inReplyTo,
     people: input.people,
@@ -534,12 +618,80 @@ async function processGmailThread(
     mailboxAddresses: input.mailboxAddresses,
   });
   await upsertGmailMessages(db, thread.id, bodies);
+  const storedMessages = await db
+    .select()
+    .from(emailMessages)
+    .where(eq(emailMessages.threadId, thread.id));
+  await rememberAlternateEmails(db, person, storedMessages, input.mailboxAddresses);
+  const personEmailsForDirection = person.emails;
+  for (const message of storedMessages) {
+    if (
+      emailMessageDirection({
+        fromEmail: message.fromEmail,
+        personEmails: personEmailsForDirection,
+        mailboxAddresses: input.mailboxAddresses,
+        toEmails: message.toEmails,
+        ccEmails: message.ccEmails,
+        threadMatched: true,
+      }) !== "inbound"
+    ) {
+      continue;
+    }
+    const ingested = await ingestExtractedText(db, {
+      personId: matched.id,
+      personEmail: matched.email,
+      keyHex: input.env.EMAIL_HASH_KEY,
+      resumeStorageDir: input.env.RESUME_STORAGE_DIR,
+      text: message.bodyText,
+      sourceType: "email_message",
+      sourceEmailMessageId: message.id,
+      actor: input.actor,
+      occurredAt: message.sentAt,
+    });
+    if (ingested.optOut) {
+      break;
+    }
+  }
+
+  const hadInbound = storedMessages.some(
+    (message) =>
+      emailMessageDirection({
+        fromEmail: message.fromEmail,
+        personEmails: personEmailsForDirection,
+        mailboxAddresses: input.mailboxAddresses,
+        toEmails: message.toEmails,
+        ccEmails: message.ccEmails,
+        threadMatched: true,
+      }) === "inbound",
+  );
+  if (hadInbound && input.enqueueScore) {
+    const reply = isInboundReply({
+      latestFrom,
+      personEmails: personEmailsForDirection,
+      messageCount: bodies.length,
+      inReplyTo,
+      mailboxAddresses: input.mailboxAddresses,
+      toEmails: latestToEmails,
+      ccEmails: latestCcEmails,
+      threadMatched: true,
+    });
+    await input.enqueueScore({
+      personId: matched.id,
+      trigger: reply ? "inbound_reply" : "inbound_email",
+    });
+  }
 }
 
 export async function runGmailSync(
   db: Database,
   env: Env,
   rawData: unknown,
+  extras?: {
+    enqueueScore?: (input: {
+      personId: string;
+      trigger: Extract<ScoreTrigger, "inbound_email" | "inbound_reply">;
+    }) => Promise<void>;
+  },
 ): Promise<void> {
   const { mailbox } = gmailSyncJobDataSchema.parse(rawData);
   if (!isConfiguredMailbox(mailbox)) {
@@ -590,7 +742,7 @@ export async function runGmailSync(
     if (usedFullList) {
       threadIds = await listContactThreadIds(
         gmail,
-        personRows.map((person) => person.email),
+        uniqueEmails(personRows.flatMap((person) => person.emails)),
         addresses,
         budget,
       );
@@ -611,6 +763,8 @@ export async function runGmailSync(
         actor,
         mailboxAddresses: addresses,
         budget,
+        env,
+        enqueueScore: extras?.enqueueScore,
       });
     }
 
@@ -668,7 +822,7 @@ async function listCalendarEvents(
   calendar: calendar_v3.Calendar,
   now: Date,
 ): Promise<calendar_v3.Schema$Event[]> {
-  const timeMin = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const timeMin = new Date(now.getTime() - CALENDAR_SYNC_LOOKBACK_MS);
   const timeMax = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
   const events: calendar_v3.Schema$Event[] = [];
   let pageToken: string | undefined;
@@ -708,6 +862,29 @@ function replacementExists(
   });
 }
 
+async function syncMeetingAttendeeAccepted(
+  db: Database,
+  input: {
+    personId: string;
+    calendarEventId: string;
+    attendeeAccepted: boolean;
+    scheduledAt: Date;
+  },
+): Promise<void> {
+  await db
+    .update(meetings)
+    .set({
+      attendeeAccepted: input.attendeeAccepted,
+      scheduledAt: input.scheduledAt,
+    })
+    .where(
+      and(
+        eq(meetings.personId, input.personId),
+        eq(meetings.calendarEventId, input.calendarEventId),
+      ),
+    );
+}
+
 async function upsertCalendarMeeting(
   db: Database,
   input: {
@@ -717,12 +894,19 @@ async function upsertCalendarMeeting(
     cancelled: boolean;
     hasReplacement: boolean;
     actor: Actor;
+    mailboxAddresses: readonly string[];
   },
 ): Promise<void> {
   const calendarEventId = input.event.id;
   if (!calendarEventId) {
     return;
   }
+
+  const attendeeAccepted = calendarEventAttendeeAccepted({
+    attendees: input.event.attendees ?? [],
+    personEmails: input.person.emails,
+    mailboxAddresses: input.mailboxAddresses,
+  });
 
   const existingRows = await db
     .select()
@@ -738,8 +922,14 @@ async function upsertCalendarMeeting(
   if (existing && existing.status !== "open") {
     await db
       .update(tasks)
-      .set({ dueAt: input.scheduledAt })
+      .set({ dueAt: input.scheduledAt, attendeeAccepted })
       .where(eq(tasks.id, existing.id));
+    await syncMeetingAttendeeAccepted(db, {
+      personId: input.person.id,
+      calendarEventId,
+      attendeeAccepted,
+      scheduledAt: input.scheduledAt,
+    });
     return;
   }
 
@@ -756,8 +946,15 @@ async function upsertCalendarMeeting(
           outcome,
           status,
           needsReview,
+          attendeeAccepted,
         })
         .where(eq(tasks.id, existing.id));
+      await syncMeetingAttendeeAccepted(db, {
+        personId: input.person.id,
+        calendarEventId,
+        attendeeAccepted,
+        scheduledAt: input.scheduledAt,
+      });
       return;
     }
     await db.insert(tasks).values({
@@ -768,7 +965,14 @@ async function upsertCalendarMeeting(
       outcome,
       status,
       needsReview,
+      attendeeAccepted,
       createdBy: input.actor.id,
+    });
+    await syncMeetingAttendeeAccepted(db, {
+      personId: input.person.id,
+      calendarEventId,
+      attendeeAccepted,
+      scheduledAt: input.scheduledAt,
     });
     return;
   }
@@ -779,8 +983,15 @@ async function upsertCalendarMeeting(
       .set({
         dueAt: input.scheduledAt,
         needsReview: false,
+        attendeeAccepted,
       })
       .where(eq(tasks.id, existing.id));
+    await syncMeetingAttendeeAccepted(db, {
+      personId: input.person.id,
+      calendarEventId,
+      attendeeAccepted,
+      scheduledAt: input.scheduledAt,
+    });
     return;
   }
 
@@ -792,7 +1003,15 @@ async function upsertCalendarMeeting(
     outcome: "scheduled",
     status: "open",
     needsReview: false,
+    attendeeAccepted,
     createdBy: input.actor.id,
+  });
+
+  await syncMeetingAttendeeAccepted(db, {
+    personId: input.person.id,
+    calendarEventId,
+    attendeeAccepted,
+    scheduledAt: input.scheduledAt,
   });
 
   await writeActivity(db, {
@@ -819,6 +1038,12 @@ export async function runCalendarSync(
   db: Database,
   env: Env,
   rawData: unknown,
+  extras?: {
+    enqueueScore?: (input: {
+      personId: string;
+      trigger: Extract<ScoreTrigger, "meeting_held">;
+    }) => Promise<void>;
+  },
 ): Promise<void> {
   const { mailbox } = calendarSyncJobDataSchema.parse(rawData);
   if (!isConfiguredMailbox(mailbox)) {
@@ -846,6 +1071,7 @@ export async function runCalendarSync(
     const addresses = mailboxEmails();
     const events = await listCalendarEvents(calendar, new Date());
 
+    const scoredPersonIds = new Set<string>();
     for (const event of events) {
       const scheduledAt = eventStart(event);
       if (!scheduledAt) {
@@ -869,7 +1095,15 @@ export async function runCalendarSync(
             ? replacementExists(events, event, person, addresses)
             : false,
           actor,
+          mailboxAddresses: addresses,
         });
+        scoredPersonIds.add(person.id);
+      }
+    }
+
+    if (extras?.enqueueScore) {
+      for (const personId of scoredPersonIds) {
+        await extras.enqueueScore({ personId, trigger: "meeting_held" });
       }
     }
 

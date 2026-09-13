@@ -8,7 +8,11 @@
     "build": "tsc --noEmit",
     "start": "tsx src/index.ts",
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "score:dry-run": "tsx src/jobs/score-dry-run.ts",
+    "score:hand-marks": "tsx src/jobs/score-hand-marks.ts",
+    "score:inspect": "tsx src/jobs/score-inspect.ts",
+    "score:seed-inspect-gap": "tsx src/jobs/seed-inspect-gap.ts"
   },
   "dependencies": {
     "@realm-labs/contracts": "workspace:*",

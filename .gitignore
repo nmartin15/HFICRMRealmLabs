@@ -8,6 +8,7 @@ out
 .env
 .env.*
 !.env.example
+crm-prod.txt
 *.pem
 *.key
 *.p12

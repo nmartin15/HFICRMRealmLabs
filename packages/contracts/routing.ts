@@ -54,6 +54,7 @@ export type DecideSuccess = {
     priceUsd: number | null;
     routingDetail: string | null;
   } | null;
+  suppression: { reason: "do_not_contact" | "rejected" } | null;
 };
 
 export type DecideResult = DecideSuccess | DecideError;
@@ -149,6 +150,7 @@ export function decide(input: DecideInput): DecideResult {
       },
       person: null,
       incubator: null,
+      suppression: null,
     };
   }
 
@@ -172,6 +174,7 @@ export function decide(input: DecideInput): DecideResult {
         priceUsd: price.priceUsd,
         routingDetail: trimmed(input.routingDetail),
       },
+      suppression: null,
     };
   }
 
@@ -196,6 +199,7 @@ export function decide(input: DecideInput): DecideResult {
     },
     person: doNotContact ? { doNotContact: true } : null,
     incubator: null,
+    suppression: { reason: doNotContact ? "do_not_contact" : "rejected" },
   };
 }
 

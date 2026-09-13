@@ -1,5 +1,8 @@
 import {
   DISPLAY_TIME_ZONE,
+  addCalendarDays,
+  zonedDatetimeLocalToUtc,
+  zonedIsoDate,
   zonedLocalToUtc,
   zonedYmd,
 } from "@realm-labs/contracts";
@@ -78,14 +81,14 @@ export function toDatetimeLocalValue(iso: string): string {
 }
 
 export function fromDatetimeLocalValue(value: string): string {
-  return new Date(value).toISOString();
+  return zonedDatetimeLocalToUtc(value, DISPLAY_TIME_ZONE).toISOString();
 }
 
 export function defaultTaskDueLocal(): string {
-  const due = new Date();
-  due.setDate(due.getDate() + 1);
-  due.setHours(9, 0, 0, 0);
-  return toDatetimeLocalValue(due.toISOString());
+  const tomorrow = addCalendarDays(zonedIsoDate(new Date(), DISPLAY_TIME_ZONE), 1);
+  return toDatetimeLocalValue(
+    zonedDatetimeLocalToUtc(`${tomorrow}T09:00`, DISPLAY_TIME_ZONE).toISOString(),
+  );
 }
 
 export function todayTaskDueLocal(): string {

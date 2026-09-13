@@ -27,8 +27,10 @@ import {
   emailThreads,
   incubatorCards,
   people,
+  personCampaignTags,
   tasks,
 } from "@realm-labs/db";
+import { loadHomeDeliverability } from "../lib/deliverability.js";
 import {
   emailThreadRowVisible,
   emailThreadsVisibleSql,
@@ -102,6 +104,8 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         openTaskRows,
         needsTrackRows,
         needsReviewRows,
+        campaignReviewRows,
+        deliverability,
       ] = await Promise.all([
         app.db
           .select({ task: tasks, person: people })
@@ -205,6 +209,15 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           .from(people)
           .where(and(listed, eq(people.needsReview, true)))
           .orderBy(asc(people.lastName), asc(people.firstName)),
+        app.db
+          .select({ person: people })
+          .from(personCampaignTags)
+          .innerJoin(people, eq(personCampaignTags.personId, people.id))
+          .where(
+            and(listed, eq(personCampaignTags.sequenceAction, "pending_review")),
+          )
+          .orderBy(asc(people.lastName), asc(people.firstName)),
+        loadHomeDeliverability(app.db, now),
       ]);
 
       const includeAllOperators =
@@ -336,12 +349,20 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
       const needsTrack = needsTrackRows.map((row) =>
         digestPerson(serializePerson(row.person)),
       );
-      const needsReview: HomePersonInput[] = needsReviewRows.map((row) => ({
-        person: digestPerson(serializePerson(row)),
-        firstName: row.firstName,
-        lastName: row.lastName,
-        needsReview: row.needsReview,
-      }));
+      const campaignReview = campaignReviewRows.map((row) =>
+        digestPerson(serializePerson(row.person)),
+      );
+      const campaignReviewIds = new Set(
+        campaignReview.map((person) => person.id),
+      );
+      const needsReview: HomePersonInput[] = needsReviewRows
+        .filter((row) => !campaignReviewIds.has(row.id))
+        .map((row) => ({
+          person: digestPerson(serializePerson(row)),
+          firstName: row.firstName,
+          lastName: row.lastName,
+          needsReview: row.needsReview,
+        }));
 
       const todos = buildHomeTodos({
         leftoverMeetings,
@@ -353,6 +374,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         incubatorWaiting,
         needsTrack,
         needsReview,
+        campaignReview,
         now,
       });
 
@@ -384,6 +406,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           scheduleCount: todayMeetings.length,
           emailCount: emails.length,
         }),
+        deliverability,
       });
     },
   );

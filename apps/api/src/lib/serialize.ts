@@ -82,6 +82,7 @@ export function serializePerson(row: PersonRow): Person {
     programInterest: row.programInterest,
     leadTemp: row.leadTemp,
     budgetQualified: row.budgetQualified,
+    score: row.score,
     doNotContact: row.doNotContact,
     needsReview: row.needsReview,
     ownerId: row.ownerId,
@@ -157,6 +158,21 @@ export function serializeMeeting(row: MeetingRow): Meeting {
   };
 }
 
+export function serializeMeetingFromTask(row: TaskRow): Meeting {
+  return {
+    id: row.id,
+    personId: row.personId,
+    scheduledAt: toIso(row.dueAt),
+    calendarEventId: row.calendarEventId,
+    outcome: row.outcome ?? "scheduled",
+    needsReview: row.needsReview,
+    notes: row.notes,
+    createdBy: row.createdBy,
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+  };
+}
+
 export function serializeActivity(row: ActivityRow): Activity {
   return {
     id: row.id,
@@ -189,6 +205,10 @@ export function serializeEmailThread(row: EmailThreadRow): EmailThread {
 export function serializeEmailMessage(
   row: EmailMessageRow,
   personEmail: string | null,
+  extras?: {
+    personEmails?: readonly string[];
+    threadMatched?: boolean;
+  },
 ): EmailMessage {
   return {
     id: row.id,
@@ -203,6 +223,10 @@ export function serializeEmailMessage(
     direction: emailMessageDirection({
       fromEmail: row.fromEmail,
       personEmail,
+      personEmails: extras?.personEmails,
+      toEmails: row.toEmails,
+      ccEmails: row.ccEmails,
+      threadMatched: extras?.threadMatched ?? Boolean(personEmail),
     }),
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
@@ -213,6 +237,7 @@ export function serializeEmailThreadWithMessages(
   row: EmailThreadRow,
   messages: readonly EmailMessageRow[],
   personEmail: string | null,
+  personEmails?: readonly string[],
 ): EmailThreadWithMessages {
   const sorted = [...messages].sort(
     (a, b) => a.sentAt.getTime() - b.sentAt.getTime(),
@@ -220,7 +245,10 @@ export function serializeEmailThreadWithMessages(
   return {
     ...serializeEmailThread(row),
     messages: sorted.map((message) =>
-      serializeEmailMessage(message, personEmail),
+      serializeEmailMessage(message, personEmail, {
+        personEmails,
+        threadMatched: Boolean(row.personId),
+      }),
     ),
   };
 }

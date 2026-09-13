@@ -138,23 +138,28 @@ describe("planWebsiteLead", () => {
     });
   });
 
-  it("does not ensure card for DNC people", () => {
-    const plan = planWebsiteLead({
-      name: "Ada Lovelace",
-      message: "Hi",
-      existing: {
-        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        doNotContact: true,
-        deleted: false,
-        hasAllocationCard: false,
-      },
-      existingNotes: null,
-    });
-    expect(plan).toMatchObject({
-      ok: true,
-      action: "update",
-      ensureAllocationCard: false,
-      setProgramTrackAllocation: false,
-    });
+  it("ignores suppressed and DNC addresses instead of creating or updating", () => {
+    expect(
+      planWebsiteLead({
+        name: "Ada Lovelace",
+        message: "Hi",
+        existing: null,
+        existingNotes: null,
+        suppressed: true,
+      }),
+    ).toEqual({ ok: true, action: "ignored" });
+    expect(
+      planWebsiteLead({
+        name: "Ada Lovelace",
+        message: "Hi",
+        existing: {
+          id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          doNotContact: true,
+          deleted: false,
+          hasAllocationCard: false,
+        },
+        existingNotes: null,
+      }),
+    ).toEqual({ ok: true, action: "ignored" });
   });
 });

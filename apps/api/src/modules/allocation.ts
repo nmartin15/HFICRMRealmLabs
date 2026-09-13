@@ -41,6 +41,7 @@ import {
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
 import { writeActivity } from "../lib/activity.js";
+import { enqueuePersonScore } from "../lib/score-enqueue.js";
 
 function emptyColumns(): AllocationBoardResponseColumns {
   return {
@@ -231,7 +232,13 @@ export const allocationRoutes: FastifyPluginAsyncZod = async (app) => {
       async (req) => {
         const actor = requireUser(req);
         return createApplicantResponseSchema.parse(
-          await createManualApplicant(app.db, actor, track, req.body),
+          await createManualApplicant(
+            app.db,
+            actor,
+            track,
+            req.body,
+            app.env.EMAIL_HASH_KEY,
+          ),
         );
       },
     );
@@ -286,6 +293,12 @@ export const allocationRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       });
 
+      await enqueuePersonScore(app.queues, {
+        personId: card.personId,
+        trigger: "stage_change",
+        computedBy: actor.id,
+      });
+
       return allocationCardSchema.parse(serializeAllocationCard(updated));
     },
   );
@@ -301,7 +314,15 @@ export const allocationRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (req) => {
       const actor = requireUser(req);
-      await applyDecision(app.db, actor, req.params.id, req.body);
+      await applyDecision(app.db, actor, req.params.id, req.body, {
+        emailHashKey: app.env.EMAIL_HASH_KEY,
+      });
+      const decided = await requireAllocationCard(app.db, req.params.id);
+      await enqueuePersonScore(app.queues, {
+        personId: decided.personId,
+        trigger: "stage_change",
+        computedBy: actor.id,
+      });
       return { ok: true as const };
     },
   );
@@ -331,7 +352,7 @@ export const allocationRoutes: FastifyPluginAsyncZod = async (app) => {
         actor,
         card.id,
         { decision: "route_incubator" },
-        { noCallAppLink: true },
+        { noCallAppLink: true, emailHashKey: app.env.EMAIL_HASH_KEY },
       );
       return { ok: true as const };
     },
@@ -385,6 +406,12 @@ export const allocationRoutes: FastifyPluginAsyncZod = async (app) => {
             programTrack: clearTrack ? null : (person?.programTrack ?? null),
           },
         },
+      });
+
+      await enqueuePersonScore(app.queues, {
+        personId: card.personId,
+        trigger: "stage_change",
+        computedBy: actor.id,
       });
 
       return { ok: true as const };

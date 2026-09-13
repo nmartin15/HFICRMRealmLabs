@@ -6,10 +6,11 @@ import {
   type PlanManualContactExisting,
 } from "@realm-labs/contracts";
 import { eq } from "drizzle-orm";
-import { people, tasks, type Database } from "@realm-labs/db";
+import { findPersonByEmail, people, tasks, type Database } from "@realm-labs/db";
 import type { AuthedUser } from "../plugins/auth.js";
 import { httpError } from "../plugins/error.js";
 import { writeActivity } from "./activity.js";
+import { suppressionReasonForEmail, writeSuppression } from "./suppression.js";
 
 function nullable(value: string | undefined): string | null {
   if (!value) {
@@ -23,13 +24,9 @@ export async function createManualContact(
   db: Database,
   actor: AuthedUser,
   body: CreatePersonBody,
+  emailHashKey: string,
 ): Promise<CreatePersonResponse> {
-  const existingRows = await db
-    .select()
-    .from(people)
-    .where(eq(people.email, body.email))
-    .limit(1);
-  const existingPerson = existingRows[0] ?? null;
+  const existingPerson = await findPersonByEmail(db, body.email);
 
   let existing: PlanManualContactExisting | null = null;
   if (existingPerson) {
@@ -40,9 +37,13 @@ export async function createManualContact(
     };
   }
 
+  const suppressed = Boolean(
+    await suppressionReasonForEmail(db, body.email, emailHashKey),
+  );
   const plan = planManualContact({
     name: body.name,
     existing,
+    suppressed,
   });
   if (!plan.ok) {
     throw httpError(plan.status, plan.code, plan.message);
@@ -140,10 +141,16 @@ export async function createManualContact(
         createdBy: actor.id,
       });
       if (taskPlan.setDoNotContact) {
-        await tx
-          .update(people)
-          .set({ doNotContact: true, programTrack: null })
-          .where(eq(people.id, personId));
+        await writeSuppression(typedTx, {
+          email: body.email,
+          keyHex: emailHashKey,
+          reason: "do_not_contact",
+          source: "operator",
+          occurredAt: when,
+          createdBy: actor.id,
+          actorEmail: actor.email,
+          personId,
+        });
       }
       await writeActivity(typedTx, {
         personId,

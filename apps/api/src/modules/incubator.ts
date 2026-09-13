@@ -33,6 +33,8 @@ import { createManualApplicant } from "../lib/applicants.js";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
 import { writeActivity } from "../lib/activity.js";
+import { enqueuePersonScore } from "../lib/score-enqueue.js";
+import { writeSuppression } from "../lib/suppression.js";
 
 type IncubatorBoardColumns = {
   sent: IncubatorBoardCard[];
@@ -201,7 +203,13 @@ export const incubatorRoutes: FastifyPluginAsyncZod = async (app) => {
     async (req) => {
       const actor = requireUser(req);
       return createApplicantResponseSchema.parse(
-        await createManualApplicant(app.db, actor, "incubator", req.body),
+        await createManualApplicant(
+          app.db,
+          actor,
+          "incubator",
+          req.body,
+          app.env.EMAIL_HASH_KEY,
+        ),
       );
     },
   );
@@ -248,6 +256,19 @@ export const incubatorRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const when = new Date();
+      if (result.stage === "approved") {
+        await writeSuppression(app.db, {
+          email: person.email,
+          keyHex: app.env.EMAIL_HASH_KEY,
+          reason: "enrolled",
+          source: "operator",
+          occurredAt: when,
+          createdBy: actor.id,
+          actorEmail: actor.email,
+          personId: person.id,
+        });
+      }
+
       const [updated] = await app.db
         .update(incubatorCards)
         .set({
@@ -294,6 +315,12 @@ export const incubatorRoutes: FastifyPluginAsyncZod = async (app) => {
             closeReason: result.closeReason,
           },
         },
+      });
+
+      await enqueuePersonScore(app.queues, {
+        personId: card.personId,
+        trigger: "stage_change",
+        computedBy: actor.id,
       });
 
       return incubatorCardSchema.parse(serializeIncubatorCard(updated));
@@ -350,6 +377,12 @@ export const incubatorRoutes: FastifyPluginAsyncZod = async (app) => {
             programTrack: clearTrack ? null : (person?.programTrack ?? null),
           },
         },
+      });
+
+      await enqueuePersonScore(app.queues, {
+        personId: card.personId,
+        trigger: "stage_change",
+        computedBy: actor.id,
       });
 
       return { ok: true as const };

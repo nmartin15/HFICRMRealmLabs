@@ -144,6 +144,17 @@ describe("planManualApplicant shared rules", () => {
     ).toBe(true);
   });
 
+  it("blocks a suppressed email even when no person exists", () => {
+    expect(
+      planManualApplicant({
+        programTrack: "allocation",
+        name: "Ada Lovelace",
+        existing: null,
+        suppressed: true,
+      }),
+    ).toMatchObject({ ok: false, status: 409, code: "SUPPRESSED" });
+  });
+
   it("blocks do not contact", () => {
     expect(
       planManualApplicant({

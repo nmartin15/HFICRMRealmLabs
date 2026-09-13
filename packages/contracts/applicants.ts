@@ -64,6 +64,7 @@ export type PlanManualApplicantInput = {
   name: string;
   existing: PlanManualApplicantExisting | null;
   applicationRef?: string;
+  suppressed?: boolean;
 };
 
 export type PlanManualApplicantError = {
@@ -103,6 +104,10 @@ export function planManualApplicant(
   const names = splitName(input.name);
   if ("error" in names) {
     return fail(400, "INVALID_NAME", names.error);
+  }
+
+  if (input.suppressed) {
+    return fail(409, "SUPPRESSED", "This email is suppressed");
   }
 
   if (input.existing?.doNotContact) {

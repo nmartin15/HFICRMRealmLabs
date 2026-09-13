@@ -7,6 +7,7 @@ import {
   canChangeUserRole,
   canConnectMailbox,
   canDeletePerson,
+  canInspectScoring,
   canViewActivity,
   canViewCard,
   canViewEmailThread,
@@ -147,6 +148,11 @@ describe("admin-only mutations", () => {
   it("allows only admin to delete people", () => {
     expect(canDeletePerson("admin")).toBe(true);
     expect(canDeletePerson("member")).toBe(false);
+  });
+
+  it("allows only admin to inspect scoring, tuning, and suppression audit", () => {
+    expect(canInspectScoring("admin")).toBe(true);
+    expect(canInspectScoring("member")).toBe(false);
   });
 
   it("allows only admin to change user roles", () => {

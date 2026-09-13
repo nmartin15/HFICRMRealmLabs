@@ -21,6 +21,11 @@ import { meetingRoutes } from "./modules/meetings.js";
 import { peopleRoutes } from "./modules/people.js";
 import { reportInputRoutes } from "./modules/report-inputs.js";
 import { reportRoutes } from "./modules/reports.js";
+import { campaignTagRoutes } from "./modules/campaign-tags.js";
+import { inspectRoutes } from "./modules/inspect.js";
+import { postmarkRoutes } from "./modules/postmark.js";
+import { scoringRoutes } from "./modules/scoring.js";
+import { suppressionAuditRoutes } from "./modules/suppression-audit.js";
 import { userRoutes } from "./modules/users.js";
 import { webhookRoutes } from "./modules/webhooks.js";
 import authPlugin from "./plugins/auth.js";
@@ -115,6 +120,11 @@ export async function buildApp(env: Env) {
   await app.register(mailboxRoutes, { prefix: "/api" });
   await app.register(webhookRoutes, { prefix: "/api" });
   await app.register(leadRoutes, { prefix: "/api" });
+  await app.register(campaignTagRoutes, { prefix: "/api" });
+  await app.register(inspectRoutes, { prefix: "/api" });
+  await app.register(scoringRoutes, { prefix: "/api" });
+  await app.register(suppressionAuditRoutes, { prefix: "/api" });
+  await app.register(postmarkRoutes, { prefix: "/api" });
 
   return app;
 }

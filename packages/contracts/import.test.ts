@@ -11,6 +11,7 @@ import {
   parseMeetingCell,
   planImportAllocation,
   planImportIncubator,
+  planImportLeadTemp,
   previewImportCounts,
   splitName,
   startOfDayIso,
@@ -416,6 +417,19 @@ describe("preview actions", () => {
     expect(preview[0]?.action).toBe("skip");
     expect(preview[0]?.errors).toContain("Email matches a deleted person");
   });
+
+  it("skips suppressed emails instead of creating a new person", () => {
+    const rows = mappedFromCsv(
+      csv([{ Name: "Ada Lovelace", Email: "ada+old@example.com" }]),
+    );
+    const preview = assignImportActions(
+      rows,
+      [],
+      new Map([["ada@example.com", "unsubscribed"]]),
+    );
+    expect(preview[0]?.action).toBe("skip");
+    expect(preview[0]?.errors).toContain("Email is suppressed");
+  });
 });
 
 describe("allocation and incubator planning", () => {
@@ -586,6 +600,37 @@ describe("update blank fields only", () => {
     expect(merged.budgetQualified).toBe("light");
     expect(merged.leadTemp).toBe("warm");
     expect(merged.notes).toBe("hello");
+  });
+
+  it("writes warmth instead of lead_temp once a score snapshot exists", () => {
+    expect(
+      planImportLeadTemp({
+        hasSnapshot: false,
+        existingLeadTemp: null,
+        incomingLeadTemp: "hot",
+      }),
+    ).toEqual({ leadTemp: "hot", warmth: null });
+    expect(
+      planImportLeadTemp({
+        hasSnapshot: false,
+        existingLeadTemp: "warm",
+        incomingLeadTemp: "hot",
+      }),
+    ).toEqual({ leadTemp: "warm", warmth: null });
+    expect(
+      planImportLeadTemp({
+        hasSnapshot: true,
+        existingLeadTemp: "warm",
+        incomingLeadTemp: "hot",
+      }),
+    ).toEqual({ leadTemp: "warm", warmth: "priority" });
+    expect(
+      planImportLeadTemp({
+        hasSnapshot: true,
+        existingLeadTemp: "hot",
+        incomingLeadTemp: "cold",
+      }),
+    ).toEqual({ leadTemp: "hot", warmth: "skeptical" });
   });
 
   it("treats unknown budget qualified as blank", () => {

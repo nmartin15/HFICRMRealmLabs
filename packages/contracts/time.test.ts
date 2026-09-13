@@ -4,6 +4,7 @@ import {
   isWithinUtcBounds,
   todayBoundsUtc,
   yesterdayBoundsUtc,
+  zonedDatetimeLocalToUtc,
   zonedIsoDate,
   zonedYmd,
 } from "./time";
@@ -36,5 +37,22 @@ describe("yesterday bounds in America/Los_Angeles", () => {
     expect(
       isWithinUtcBounds(new Date("2026-08-24T06:59:59.000Z"), { start, end }),
     ).toBe(false);
+  });
+});
+
+describe("zonedDatetimeLocalToUtc", () => {
+  it("treats datetime-local as America/Los_Angeles, not the host offset", () => {
+    expect(zonedDatetimeLocalToUtc("2026-08-24T09:00").toISOString()).toBe(
+      "2026-08-24T16:00:00.000Z",
+    );
+    expect(zonedDatetimeLocalToUtc("2026-01-15T09:00").toISOString()).toBe(
+      "2026-01-15T17:00:00.000Z",
+    );
+  });
+
+  it("rejects values the datetime-local input cannot produce", () => {
+    expect(() => zonedDatetimeLocalToUtc("2026-08-24 09:00")).toThrow(
+      "Invalid datetime-local value",
+    );
   });
 });

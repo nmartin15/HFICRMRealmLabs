@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
-import { createDb, type Database } from "@realm-labs/db";
+import { createDb, ensureEmailHashKeyFingerprint, type Database } from "@realm-labs/db";
 import type { Env } from "../env.js";
 import {
   closeSyncQueues,
@@ -24,6 +24,7 @@ declare module "fastify" {
 
 const dbPlugin: FastifyPluginAsync<{ env: Env }> = async (app, opts) => {
   const { db, client } = createDb(opts.env.DATABASE_URL);
+  await ensureEmailHashKeyFingerprint(db, opts.env.EMAIL_HASH_KEY);
   const queues = createSyncQueues(opts.env.REDIS_URL);
   app.decorate("db", db);
   app.decorate("env", opts.env);

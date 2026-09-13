@@ -32,6 +32,16 @@ describe("planManualContact", () => {
     ).toMatchObject({ ok: false, status: 400, code: "INVALID_NAME" });
   });
 
+  it("blocks a suppressed email even when no person exists", () => {
+    expect(
+      planManualContact({
+        name: "Ada Lovelace",
+        existing: null,
+        suppressed: true,
+      }),
+    ).toMatchObject({ ok: false, status: 409, code: "SUPPRESSED" });
+  });
+
   it("blocks do not contact", () => {
     expect(
       planManualContact({

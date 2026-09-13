@@ -29,6 +29,7 @@ describe("decide allocate", () => {
       },
       person: null,
       incubator: null,
+      suppression: null,
     });
   });
 });
@@ -57,6 +58,7 @@ describe("decide route_incubator", () => {
         priceUsd: null,
         routingDetail: "strong operator",
       },
+      suppression: null,
     });
   });
 
@@ -160,6 +162,7 @@ describe("decide pass", () => {
       },
       person: { doNotContact: true },
       incubator: null,
+      suppression: { reason: "do_not_contact" },
     });
   });
 
@@ -174,6 +177,7 @@ describe("decide pass", () => {
       },
       person: null,
       incubator: null,
+      suppression: { reason: "rejected" },
     });
   });
 });

@@ -1,14 +1,23 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 
 const PREFIX = "v1";
 const KEY_BYTES = 32;
 
-export function parseTokenEncryptionKey(keyHex: string): Buffer {
+export function parseHexSecretKey(keyHex: string, name: string): Buffer {
   const key = Buffer.from(keyHex, "hex");
   if (key.length !== KEY_BYTES) {
-    throw new Error("TOKEN_ENCRYPTION_KEY must be 64 hex characters (32 bytes)");
+    throw new Error(`${name} must be 64 hex characters (32 bytes)`);
   }
   return key;
+}
+
+export function parseTokenEncryptionKey(keyHex: string): Buffer {
+  return parseHexSecretKey(keyHex, "TOKEN_ENCRYPTION_KEY");
+}
+
+export function hmacSha256Hex(keyHex: string, value: string): string {
+  const key = parseHexSecretKey(keyHex, "EMAIL_HASH_KEY");
+  return createHmac("sha256", key).update(value, "utf8").digest("hex");
 }
 
 export function encryptSecret(plaintext: string, keyHex: string): string {

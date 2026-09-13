@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  alternateEmailToRecord,
   canonicalEmail,
   decodeGmailBase64Url,
   emailMessageDirection,
@@ -159,6 +160,88 @@ describe("email matching", () => {
         mailboxAddresses: mailboxes,
       }),
     ).toBe("other");
+  });
+
+  it("matches and labels inbound from alternate person addresses", () => {
+    const janeWithAlt = { ...jane, emails: ["jane.work@corp.com"] };
+    expect(
+      matchPersonFromParticipants(
+        ["jane.work@corp.com"],
+        [janeWithAlt],
+        mailboxes,
+      )?.id,
+    ).toBe(jane.id);
+    expect(
+      emailMessageDirection({
+        fromEmail: "Jane.Work@corp.com",
+        personEmail: jane.email,
+        personEmails: ["jane.work@corp.com"],
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBe("inbound");
+  });
+
+  it("counts thread participation as inbound when they write to our mailbox", () => {
+    expect(
+      emailMessageDirection({
+        fromEmail: "jane.work@corp.com",
+        personEmail: jane.email,
+        toEmails: [PERSONAL_MAILBOX_EMAIL],
+        threadMatched: true,
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBe("inbound");
+  });
+
+  it("does not treat a matched-thread From as inbound when the person is the recipient", () => {
+    expect(
+      emailMessageDirection({
+        fromEmail: "s@volareresearch.com",
+        personEmail: "phctrade@gmail.com",
+        toEmails: ["phctrade@gmail.com", PERSONAL_MAILBOX_EMAIL],
+        threadMatched: true,
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBe("other");
+  });
+
+  it("leaves non-mailbox From as other when the person is the recipient", () => {
+    expect(
+      emailMessageDirection({
+        fromEmail: "s@volareresearch.com",
+        personEmail: "phctrade@gmail.com",
+        toEmails: ["phctrade@gmail.com"],
+        threadMatched: true,
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBe("other");
+    expect(
+      alternateEmailToRecord({
+        fromEmail: "s@volareresearch.com",
+        toEmails: ["phctrade@gmail.com"],
+        personEmails: ["phctrade@gmail.com"],
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBeNull();
+  });
+
+  it("records an alternate when the person writes to us from another address", () => {
+    expect(
+      alternateEmailToRecord({
+        fromEmail: "Jane.Work@corp.com",
+        toEmails: [PERSONAL_MAILBOX_EMAIL],
+        personEmails: [jane.email],
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBe("jane.work@corp.com");
+    expect(
+      alternateEmailToRecord({
+        fromEmail: "jane.work@corp.com",
+        toEmails: [PERSONAL_MAILBOX_EMAIL, jane.email],
+        personEmails: [jane.email],
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBeNull();
   });
 
   it("extracts text/plain from nested Gmail MIME and ignores HTML", () => {

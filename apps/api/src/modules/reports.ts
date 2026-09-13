@@ -1,6 +1,7 @@
 import {
   canViewPerson,
   computeReport,
+  deliverabilitySnapshotSchema,
   parseReportRange,
   reportQuerySchema,
   reportResponseSchema,
@@ -17,8 +18,25 @@ import {
 } from "@realm-labs/db";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
+import { loadDeliverabilitySnapshot } from "../lib/deliverability.js";
 
 export const reportRoutes: FastifyPluginAsyncZod = async (app) => {
+  app.get(
+    "/deliverability",
+    {
+      schema: {
+        response: { 200: deliverabilitySnapshotSchema },
+      },
+    },
+    async (req) => {
+      requireUser(req);
+      if (!canViewPerson()) {
+        throw httpError(403, "FORBIDDEN", "Forbidden");
+      }
+      return loadDeliverabilitySnapshot(app.db, new Date());
+    },
+  );
+
   app.get(
     "/reports",
     {

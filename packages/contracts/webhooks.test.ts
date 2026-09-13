@@ -146,6 +146,17 @@ describe("decideApplicationWebhook", () => {
       }),
     ).toMatchObject({ action: "flag", cardId: null, needsReview: true });
   });
+
+  it("ignores suppressed addresses instead of creating a person", () => {
+    expect(
+      decideApplicationWebhook({
+        applicationRef: "APP-1",
+        cardByRef: null,
+        personByEmail: null,
+        suppressed: true,
+      }),
+    ).toEqual({ action: "ignored" });
+  });
 });
 
 describe("personNamesFromApplication", () => {

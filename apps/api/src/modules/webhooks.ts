@@ -19,13 +19,16 @@ import {
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { eq } from "drizzle-orm";
 import {
+  findPersonByEmail,
   incubatorCards,
   people,
   type Database,
 } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
+import { enqueuePersonScore } from "../lib/score-enqueue.js";
 import { secretsEqual } from "../lib/secrets.js";
 import { verifyStripeSignature } from "../lib/stripe-signature.js";
+import { suppressionReasonForEmail } from "../lib/suppression.js";
 import { httpError } from "../plugins/error.js";
 
 function headerValue(
@@ -59,12 +62,7 @@ async function cardByApplicationRef(db: Database, applicationRef: string) {
 }
 
 async function personByEmail(db: Database, email: string) {
-  const rows = await db
-    .select()
-    .from(people)
-    .where(eq(people.email, email))
-    .limit(1);
-  const person = rows[0];
+  const person = await findPersonByEmail(db, email);
   if (!person) {
     return null;
   }
@@ -143,12 +141,16 @@ async function writeIncubatorStageChange(
 async function handleApplicationPayload(
   db: Database,
   body: ApplicationWebhookBody,
+  emailHashKey: string,
   retried = false,
 ) {
   const when = new Date();
   const answersJson = serializeApplicationResult(body.answers);
   const matched = await personByEmail(db, body.email);
   const existingRef = await cardByApplicationRef(db, body.application_ref);
+  const suppressed = Boolean(
+    await suppressionReasonForEmail(db, body.email, emailHashKey),
+  );
   const decision = decideApplicationWebhook({
     applicationRef: body.application_ref,
     cardByRef: existingRef ? toWebhookCard(existingRef) : null,
@@ -159,7 +161,18 @@ async function handleApplicationPayload(
           incubatorCard: matched.card ? toWebhookCard(matched.card) : null,
         }
       : null,
+    suppressed,
   });
+
+  if (decision.action === "ignored") {
+    return applicationWebhookResponseSchema.parse({
+      received: true,
+      idempotent: false,
+      personId: null,
+      incubatorCardId: null,
+      needsReview: false,
+    });
+  }
 
   if (decision.action === "idempotent") {
     return applicationWebhookResponseSchema.parse({
@@ -336,7 +349,7 @@ async function handleApplicationPayload(
     if (!isUniqueViolation(err) || retried) {
       throw err;
     }
-    return handleApplicationPayload(db, body, true);
+    return handleApplicationPayload(db, body, emailHashKey, true);
   }
 }
 
@@ -362,7 +375,18 @@ export const webhookRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!provided || !secretsEqual(provided, expected)) {
         throw httpError(401, "UNAUTHORIZED", "Invalid webhook secret");
       }
-      return handleApplicationPayload(app.db, req.body);
+      const result = await handleApplicationPayload(
+        app.db,
+        req.body,
+        app.env.EMAIL_HASH_KEY,
+      );
+      if (result.personId && !result.idempotent) {
+        await enqueuePersonScore(app.queues, {
+          personId: result.personId,
+          trigger: "application",
+        });
+      }
+      return result;
     },
   );
 
@@ -455,6 +479,13 @@ export const webhookRoutes: FastifyPluginAsyncZod = async (app) => {
               eventId: event.id,
             },
           });
+        });
+      }
+
+      if (decision.action === "paid" && matched?.card) {
+        await enqueuePersonScore(app.queues, {
+          personId: matched.card.personId,
+          trigger: "application",
         });
       }
 

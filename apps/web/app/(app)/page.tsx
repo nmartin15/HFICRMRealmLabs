@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -11,6 +11,7 @@ import type {
 import {
   meetingTaskNeedsOutcome,
   personDisplayName,
+  formatReportRate,
 } from "@realm-labs/contracts";
 import { api } from "@/lib/api";
 import { formatDateTime, formatTime, formatWeekdayDate } from "@/lib/format";
@@ -25,6 +26,7 @@ import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Record<HomeTodoKind, string> = {
   close_meeting: "Call",
+  campaign_review: "Hot",
   needs_track: "Track",
   needs_review: "Review",
   task: "Task",
@@ -36,6 +38,7 @@ const KIND_LABEL: Record<HomeTodoKind, string> = {
 
 const KIND_CLASS: Record<HomeTodoKind, string> = {
   close_meeting: "text-canary",
+  campaign_review: "text-canary",
   needs_track: "text-canary",
   needs_review: "text-canary",
   task: "text-primary",
@@ -69,7 +72,7 @@ export default function HomePage() {
       .finally(() => setLoaded(true));
   }, [load]);
 
-  const todos = snapshot?.todos ?? [];
+  const todos = useMemo(() => snapshot?.todos ?? [], [snapshot?.todos]);
   const selected = useListNavigation(todos.length);
 
   useEffect(() => {
@@ -141,6 +144,25 @@ export default function HomePage() {
           <CountChip label="Calls" value={counts.calls} />
           <CountChip label="Emails" value={counts.emails} />
         </dl>
+      ) : null}
+
+      {snapshot?.deliverability ? (
+        <p
+          className={cn(
+            "text-sm",
+            snapshot.deliverability.watch
+              ? "text-canary"
+              : "text-muted-foreground",
+          )}
+        >
+          Complaints this week{" "}
+          {formatReportRate(snapshot.deliverability.complaintRate)}
+          {snapshot.deliverability.watch ? " · watch 0.1%" : ""}
+          {" · "}
+          <Link href="/reports" className="hover:underline">
+            Deliverability
+          </Link>
+        </p>
       ) : null}
 
       <section className="space-y-2">

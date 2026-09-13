@@ -15,12 +15,14 @@ import {
   isoDateSchema,
   isoDateTimeSchema,
   leadTempSchema,
+  operatorWarmthLevelSchema,
   personSourceSchema,
   programInterestSchema,
   programTrackSchema,
   uuidSchema,
 } from "./enums";
 import { splitName } from "./import";
+import { personScoreSchema } from "./scoring";
 import { createTaskBodySchema, taskSchema } from "./tasks";
 import { timelineItemSchema } from "./timeline";
 
@@ -42,6 +44,7 @@ export const personSchema = z.object({
   programInterest: programInterestSchema.nullable(),
   leadTemp: leadTempSchema.nullable(),
   budgetQualified: budgetQualifiedSchema,
+  score: personScoreSchema.nullable(),
   doNotContact: z.boolean(),
   needsReview: z.boolean(),
   ownerId: uuidSchema.nullable(),
@@ -75,6 +78,11 @@ export const personPatchSchema = z.object({
   needsReview: z.boolean().optional(),
 });
 export type PersonPatch = z.infer<typeof personPatchSchema>;
+
+export const operatorTempBodySchema = z.object({
+  level: operatorWarmthLevelSchema,
+});
+export type OperatorTempBody = z.infer<typeof operatorTempBodySchema>;
 
 export const createPersonNoteBodySchema = z.object({
   text: z.string().trim().min(1),
@@ -135,10 +143,15 @@ function failContact(
 export function planManualContact(input: {
   name: string;
   existing: PlanManualContactExisting | null;
+  suppressed?: boolean;
 }): PlanManualContactResult {
   const names = splitName(input.name);
   if ("error" in names) {
     return failContact(400, "INVALID_NAME", names.error);
+  }
+
+  if (input.suppressed) {
+    return failContact(409, "SUPPRESSED", "This email is suppressed");
   }
 
   if (input.existing?.doNotContact) {
@@ -190,11 +203,19 @@ export const personBoardBadgeSchema = z.discriminatedUnion("board", [
 ]);
 export type PersonBoardBadgeResponse = z.infer<typeof personBoardBadgeSchema>;
 
+export const personCampaignHoldSchema = z.object({
+  tag: z.string().min(1),
+  sequenceAction: z.literal("pending_review"),
+});
+export type PersonCampaignHold = z.infer<typeof personCampaignHoldSchema>;
+
 export const personDetailResponseSchema = z.object({
   person: personSchema,
   board: personBoardBadgeSchema.nullable(),
   tasks: z.array(taskSchema),
   timeline: z.array(timelineItemSchema),
+  scoreHoldSummary: z.string().nullable(),
+  campaignHold: personCampaignHoldSchema.nullable(),
 });
 export type PersonDetailResponse = z.infer<typeof personDetailResponseSchema>;
 

@@ -18,9 +18,11 @@ import {
   type MeetingDigestPerson,
 } from "./meetings";
 import { UNKNOWN_PERSON_NAME } from "./webhooks";
+import { homeDeliverabilitySchema } from "./deliverability";
 
 export const HOME_TODO_KINDS = [
   "close_meeting",
+  "campaign_review",
   "needs_track",
   "needs_review",
   "task",
@@ -35,13 +37,14 @@ export type HomeTodoKind = z.infer<typeof homeTodoKindSchema>;
 
 const KIND_ORDER: Record<HomeTodoKind, number> = {
   close_meeting: 0,
-  needs_track: 1,
-  needs_review: 2,
-  task: 3,
-  email: 4,
-  call: 5,
-  decision: 6,
-  incubator: 7,
+  campaign_review: 1,
+  needs_track: 2,
+  needs_review: 3,
+  task: 4,
+  email: 5,
+  call: 6,
+  decision: 7,
+  incubator: 8,
 };
 
 export const homeTodoSchema = z.object({
@@ -121,6 +124,7 @@ export const homeSnapshotResponseSchema = z.object({
     calls: z.number().int().nonnegative(),
     emails: z.number().int().nonnegative(),
   }),
+  deliverability: homeDeliverabilitySchema,
 });
 export type HomeSnapshotResponse = z.infer<typeof homeSnapshotResponseSchema>;
 
@@ -178,6 +182,7 @@ export function buildHomeTodos(input: {
   incubatorWaiting: HomeIncubatorInput[];
   needsTrack: MeetingDigestPerson[];
   needsReview: HomePersonInput[];
+  campaignReview: MeetingDigestPerson[];
   now: Date;
 }): HomeTodo[] {
   const items: HomeTodo[] = [];
@@ -218,6 +223,21 @@ export function buildHomeTodos(input: {
         at: item.task.dueAt,
         taskId: item.task.id,
         personId: item.person.id,
+      }),
+    );
+  }
+
+  for (const person of input.campaignReview) {
+    items.push(
+      todo({
+        id: `campaign-review:${person.id}`,
+        kind: "campaign_review",
+        href: `/people/${person.id}`,
+        title: personDisplayName(person),
+        detail: "Release hot sequence",
+        at: null,
+        taskId: null,
+        personId: person.id,
       }),
     );
   }

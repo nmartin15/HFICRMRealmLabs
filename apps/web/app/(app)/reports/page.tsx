@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ReportRange, ReportResponse } from "@realm-labs/contracts";
+import type { DeliverabilitySnapshot, ReportRange, ReportResponse } from "@realm-labs/contracts";
 import {
   currentWeekRange,
   formatReportRate,
@@ -40,6 +40,8 @@ export default function ReportsPage() {
   const [view, setView] = useState<View>("total");
   const [week, setWeek] = useState(() => currentWeekRange());
   const [report, setReport] = useState<ReportResponse | null>(null);
+  const [deliverability, setDeliverability] =
+    useState<DeliverabilitySnapshot | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -68,6 +70,16 @@ export default function ReportsPage() {
       setError(err instanceof Error ? err.message : "Failed to load report");
     });
   }, [load]);
+
+  useEffect(() => {
+    void api<DeliverabilitySnapshot>("/deliverability")
+      .then(setDeliverability)
+      .catch((err: unknown) => {
+        setError(
+          err instanceof Error ? err.message : "Failed to load deliverability",
+        );
+      });
+  }, []);
 
   const rows = report?.rows ?? [];
   const selected = useListNavigation(rows.length);
@@ -206,6 +218,54 @@ export default function ReportsPage() {
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
+
+      {deliverability ? (
+        <section className="space-y-2">
+          <h2 className="text-sm font-medium">Deliverability</h2>
+          <p
+            className={cn(
+              "text-xs",
+              deliverability.watch || deliverability.gmailLimit
+                ? "text-canary"
+                : "text-muted-foreground",
+            )}
+          >
+            This week {deliverability.sent} sent · bounce{" "}
+            {formatReportRate(deliverability.bounceRate)} · complaints{" "}
+            {formatReportRate(deliverability.complaintRate)}
+            {deliverability.watch ? " · watch 0.1%" : ""}
+            {deliverability.gmailLimit ? " · Gmail 0.3% limit" : ""}
+          </p>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs text-muted-foreground">
+                  <th className="px-3 py-2 font-medium">Week</th>
+                  <th className="px-3 py-2 font-medium">Sent</th>
+                  <th className="px-3 py-2 font-medium">Bounce</th>
+                  <th className="px-3 py-2 font-medium">Complaint</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deliverability.weeks.map((weekRow) => (
+                  <tr key={weekRow.start} className="border-b last:border-0">
+                    <td className="px-3 py-2">
+                      {weekRow.start} → {weekRow.end}
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">{weekRow.sent}</td>
+                    <td className="px-3 py-2 tabular-nums">
+                      {formatReportRate(weekRow.bounceRate)}
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">
+                      {formatReportRate(weekRow.complaintRate)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {!report && !error ? (
         <p className="text-sm text-muted-foreground">Loading…</p>

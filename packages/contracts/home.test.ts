@@ -89,6 +89,7 @@ describe("home day snapshot", () => {
       decisions: [{ person }],
       incubatorWaiting: [{ person, stage: "applied" }],
       needsTrack: [person],
+      campaignReview: [person],
       needsReview: [
         {
           person,
@@ -103,6 +104,7 @@ describe("home day snapshot", () => {
     expect(todos.map((item) => item.kind)).toEqual([
       "close_meeting",
       "close_meeting",
+      "campaign_review",
       "needs_track",
       "needs_review",
       "task",
@@ -113,6 +115,9 @@ describe("home day snapshot", () => {
     ]);
     expect(todos.some((item) => item.taskId === todayUpcoming.task.id)).toBe(
       false,
+    );
+    expect(todos.find((item) => item.kind === "campaign_review")?.detail).toBe(
+      "Release hot sequence",
     );
     expect(todos.find((item) => item.kind === "needs_track")?.detail).toBe(
       "Set program track",
@@ -127,7 +132,7 @@ describe("home day snapshot", () => {
       scheduleCount: 2,
       emailCount: 3,
     });
-    expect(counts.todo).toBe(9);
+    expect(counts.todo).toBe(10);
     expect(counts.meetings).toBe(3);
     expect(counts.calls).toBe(4);
     expect(counts.emails).toBe(4);

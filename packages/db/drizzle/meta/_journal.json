@@ -57,6 +57,69 @@
       "when": 1789000800000,
       "tag": "0007_operator_mailboxes",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789300000000,
+      "tag": "0008_scoring_consent_suppression",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789400000000,
+      "tag": "0009_score_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789500000000,
+      "tag": "0010_score_loader_facts",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789600000000,
+      "tag": "0011_campaign_tags_sends",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789700000000,
+      "tag": "0012_send_dequeue_churn",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1789800000000,
+      "tag": "0013_postmark_deliverability",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1789900000000,
+      "tag": "0014_score_inspect",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1790000000000,
+      "tag": "0015_email_hash_key_and_sent_reject",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790100000000,
+      "tag": "0016_send_claim_sending",
+      "breakpoints": true
     }
   ]
 }

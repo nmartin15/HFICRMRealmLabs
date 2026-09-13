@@ -151,8 +151,8 @@ export function CompleteTaskForm({
         </>
       ) : (
         <p className="text-xs text-muted-foreground">
-          You already have another open task. Closing this does not create
-          another follow-up.
+          Closing this records that you finished the work. Add a new task if
+          you still need a follow-up.
         </p>
       )}
       <div className="flex justify-end gap-2">

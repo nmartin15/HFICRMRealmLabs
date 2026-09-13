@@ -21,12 +21,16 @@ import {
   personSchema,
   planCompleteTask,
   planCreateTask,
+  planDoNotContactChange,
+  planLeadTempPatch,
   planUpdateTask,
+  operatorTempBodySchema,
+  scoreBucketHoldSchema,
+  warmthSignalValueSchema,
+  taskIdParamsSchema,
   taskSchema,
   updateTaskBodySchema,
-  uuidSchema,
 } from "@realm-labs/contracts";
-import { z } from "zod";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import {
@@ -35,13 +39,23 @@ import {
   emailMessages,
   emailThreads,
   incubatorCards,
+  listAlternateEmailsByPerson,
   people,
+  personCampaignTags,
+  personScoreSnapshots,
+  personSignals,
   tasks,
   users,
   type Database,
 } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
 import { createManualContact } from "../lib/contacts.js";
+import { ingestExtractedText } from "../lib/signals.js";
+import {
+  enqueuePersonScore,
+  personHasScoreSnapshot,
+} from "../lib/score-enqueue.js";
+import { writeSuppression } from "../lib/suppression.js";
 import {
   emailThreadRowVisible,
   emailThreadsVisibleSql,
@@ -74,6 +88,35 @@ async function requirePerson(db: Database, id: string) {
     throw httpError(404, "NOT_FOUND", "Person not found");
   }
   return row;
+}
+
+async function ingestCallOrMeetingNotes(
+  db: Database,
+  input: {
+    personId: string;
+    personEmail: string;
+    keyHex: string;
+    resumeStorageDir: string;
+    kind: string;
+    notes: string | null;
+    taskId: string;
+    actor: { id: string; email: string };
+  },
+): Promise<void> {
+  if ((input.kind !== "call" && input.kind !== "meeting") || !input.notes?.trim()) {
+    return;
+  }
+  await ingestExtractedText(db, {
+    personId: input.personId,
+    personEmail: input.personEmail,
+    keyHex: input.keyHex,
+    resumeStorageDir: input.resumeStorageDir,
+    text: input.notes,
+    sourceType: "task",
+    sourceTaskId: input.taskId,
+    actor: input.actor,
+    occurredAt: new Date(),
+  });
 }
 
 async function personTimeline(
@@ -115,6 +158,9 @@ async function personTimeline(
     messagesByThread.set(message.threadId, list);
   }
 
+  const altMap = await listAlternateEmailsByPerson(db, [person.id]);
+  const personEmails = [person.email, ...(altMap.get(person.id) ?? [])];
+
   return mergePersonTimeline({
     activities: activityRows.map((row) =>
       activitySchema.parse(serializeActivity(row)),
@@ -124,6 +170,7 @@ async function personTimeline(
         row,
         messagesByThread.get(row.id) ?? [],
         person.email,
+        personEmails,
       ),
     ),
   });
@@ -196,7 +243,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         throw httpError(403, "FORBIDDEN", "Forbidden");
       }
       return createPersonResponseSchema.parse(
-        await createManualContact(app.db, actor, req.body),
+        await createManualContact(app.db, actor, req.body, app.env.EMAIL_HASH_KEY),
       );
     },
   );
@@ -217,7 +264,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const row = await requirePerson(app.db, req.params.id);
-      const [board, timeline, taskRows] = await Promise.all([
+      const [board, timeline, taskRows, snapshotRows, campaignHoldRows] = await Promise.all([
         personBoard(app.db, row),
         personTimeline(app.db, row, actor),
         app.db
@@ -225,13 +272,39 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           .from(tasks)
           .where(eq(tasks.personId, row.id))
           .orderBy(asc(tasks.dueAt)),
+        app.db
+          .select({ hold: personScoreSnapshots.hold })
+          .from(personScoreSnapshots)
+          .where(eq(personScoreSnapshots.personId, row.id))
+          .orderBy(desc(personScoreSnapshots.computedAt))
+          .limit(1),
+        app.db
+          .select({
+            tag: personCampaignTags.tag,
+            sequenceAction: personCampaignTags.sequenceAction,
+          })
+          .from(personCampaignTags)
+          .where(eq(personCampaignTags.personId, row.id))
+          .limit(1),
       ]);
+
+      const hold = snapshotRows[0]
+        ? scoreBucketHoldSchema.safeParse(snapshotRows[0].hold)
+        : null;
+      const campaignHoldRow = campaignHoldRows[0];
+      const campaignHold =
+        campaignHoldRow?.sequenceAction === "pending_review" &&
+        campaignHoldRow.tag
+          ? { tag: campaignHoldRow.tag, sequenceAction: "pending_review" as const }
+          : null;
 
       return personDetailResponseSchema.parse({
         person: serializePerson(row),
         board,
         tasks: taskRows.map((task) => serializeTask(task)),
         timeline,
+        scoreHoldSummary: hold?.success ? hold.data.summary : null,
+        campaignHold,
       });
     },
   );
@@ -315,6 +388,12 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       if (patch.leadTemp !== undefined && patch.leadTemp !== row.leadTemp) {
+        const owned = planLeadTempPatch(
+          await personHasScoreSnapshot(app.db, row.id),
+        );
+        if (owned.reject) {
+          throw httpError(owned.status, owned.code, owned.message);
+        }
         before.leadTemp = row.leadTemp;
         after.leadTemp = patch.leadTemp;
         update.leadTemp = patch.leadTemp;
@@ -331,10 +410,17 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         patch.doNotContact !== undefined &&
         patch.doNotContact !== row.doNotContact
       ) {
+        const dncPlan = planDoNotContactChange({
+          currentlyDoNotContact: row.doNotContact,
+          nextDoNotContact: patch.doNotContact,
+        });
+        if (!dncPlan.ok) {
+          throw httpError(dncPlan.status, dncPlan.code, dncPlan.message);
+        }
         before.doNotContact = row.doNotContact;
         after.doNotContact = patch.doNotContact;
         update.doNotContact = patch.doNotContact;
-        if (patch.doNotContact) {
+        if (dncPlan.writeSuppression) {
           before.programTrack = row.programTrack;
           after.programTrack = null;
           update.programTrack = null;
@@ -377,6 +463,19 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
 
       if (Object.keys(update).length === 0) {
         return personSchema.parse(serializePerson(row));
+      }
+
+      if (update.doNotContact === true) {
+        await writeSuppression(app.db, {
+          email: row.email,
+          keyHex: app.env.EMAIL_HASH_KEY,
+          reason: "do_not_contact",
+          source: "operator",
+          occurredAt: new Date(),
+          createdBy: actor.id,
+          actorEmail: actor.email,
+          personId: row.id,
+        });
       }
 
       const [updated] = await app.db
@@ -430,7 +529,66 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         }
       }
 
+      if (
+        after.budgetQualified !== undefined ||
+        after.programTrack !== undefined ||
+        after.leadTemp !== undefined
+      ) {
+        await enqueuePersonScore(app.queues, {
+          personId: updated.id,
+          trigger: "manual_edit",
+          computedBy: actor.id,
+        });
+      }
+
       return personSchema.parse(serializePerson(updated));
+    },
+  );
+
+  app.post(
+    "/people/:id/operator-temp",
+    {
+      schema: {
+        params: personIdParamsSchema,
+        body: operatorTempBodySchema,
+        response: { 200: personSchema },
+      },
+    },
+    async (req) => {
+      const actor = requireUser(req);
+      const row = await requirePerson(app.db, req.params.id);
+      const at = Date.now();
+      const value = warmthSignalValueSchema.parse({
+        level: req.body.level,
+        at,
+        setBy: { id: actor.id, email: actor.email, name: actor.name },
+      });
+      await app.db.insert(personSignals).values({
+        personId: row.id,
+        kind: "warmth",
+        value,
+        excerpt: `operator ${req.body.level}`,
+        sourceType: "operator",
+        extractor: "operator",
+      });
+      await writeActivity(app.db, {
+        personId: row.id,
+        userId: actor.id,
+        type: "field_change",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "signal.operator_temp",
+          when: new Date(at).toISOString(),
+          before: null,
+          after: { level: req.body.level },
+        },
+      });
+      await enqueuePersonScore(app.queues, {
+        personId: row.id,
+        trigger: "operator_temp",
+        computedBy: actor.id,
+      });
+      return personSchema.parse(serializePerson(row));
     },
   );
 
@@ -602,10 +760,16 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const when = new Date();
       if (plan.setDoNotContact && !row.doNotContact) {
-        await app.db
-          .update(people)
-          .set({ doNotContact: true, programTrack: null })
-          .where(eq(people.id, row.id));
+        await writeSuppression(app.db, {
+          email: row.email,
+          keyHex: app.env.EMAIL_HASH_KEY,
+          reason: "do_not_contact",
+          source: "operator",
+          occurredAt: when,
+          createdBy: actor.id,
+          actorEmail: actor.email,
+          personId: row.id,
+        });
       }
       await writeActivity(app.db, {
         personId: row.id,
@@ -623,6 +787,16 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           },
         },
       });
+      await ingestCallOrMeetingNotes(app.db, {
+        personId: row.id,
+        personEmail: row.email,
+        keyHex: app.env.EMAIL_HASH_KEY,
+        resumeStorageDir: app.env.RESUME_STORAGE_DIR,
+        kind: created.kind,
+        notes: created.notes,
+        taskId: created.id,
+        actor,
+      });
       return taskSchema.parse(serializeTask(created));
     },
   );
@@ -631,7 +805,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
     "/people/:id/tasks/:taskId",
     {
       schema: {
-        params: z.object({ id: uuidSchema, taskId: uuidSchema }),
+        params: taskIdParamsSchema,
         body: updateTaskBodySchema,
         response: { 200: taskSchema },
       },
@@ -688,10 +862,16 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       if (plan.setDoNotContact && !row.doNotContact) {
-        await app.db
-          .update(people)
-          .set({ doNotContact: true, programTrack: null })
-          .where(eq(people.id, row.id));
+        await writeSuppression(app.db, {
+          email: row.email,
+          keyHex: app.env.EMAIL_HASH_KEY,
+          reason: "do_not_contact",
+          source: "operator",
+          occurredAt: new Date(),
+          createdBy: actor.id,
+          actorEmail: actor.email,
+          personId: row.id,
+        });
       }
 
       await writeActivity(app.db, {
@@ -716,6 +896,16 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           },
         },
       });
+      await ingestCallOrMeetingNotes(app.db, {
+        personId: row.id,
+        personEmail: row.email,
+        keyHex: app.env.EMAIL_HASH_KEY,
+        resumeStorageDir: app.env.RESUME_STORAGE_DIR,
+        kind: updated.kind,
+        notes: updated.notes,
+        taskId: updated.id,
+        actor,
+      });
       return taskSchema.parse(serializeTask(updated));
     },
   );
@@ -724,7 +914,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
     "/people/:id/tasks/:taskId/complete",
     {
       schema: {
-        params: z.object({ id: uuidSchema, taskId: uuidSchema }),
+        params: taskIdParamsSchema,
         body: completeTaskBodySchema,
         response: { 200: taskSchema },
       },
@@ -809,6 +999,27 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!updated) {
         throw httpError(500, "INTERNAL", "Failed to complete task");
       }
+      // #region agent log
+      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "126ed8",
+        },
+        body: JSON.stringify({
+          sessionId: "126ed8",
+          runId: "post-fix",
+          hypothesisId: "B",
+          location: "apps/api/src/modules/people.ts:complete-updated",
+          message: "task row after complete",
+          data: {
+            status: updated.status,
+            createdFollowUp: Boolean(plan.next),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
 
       const nextStatus = plan.next
         ? plan.next.kind === "dnc"
@@ -851,10 +1062,16 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         });
       }
       if (plan.setDoNotContact && !row.doNotContact) {
-        await app.db
-          .update(people)
-          .set({ doNotContact: true, programTrack: null })
-          .where(eq(people.id, row.id));
+        await writeSuppression(app.db, {
+          email: row.email,
+          keyHex: app.env.EMAIL_HASH_KEY,
+          reason: "do_not_contact",
+          source: "operator",
+          occurredAt: new Date(),
+          createdBy: actor.id,
+          actorEmail: actor.email,
+          personId: row.id,
+        });
       }
 
       const when = new Date();
@@ -883,6 +1100,29 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           },
         },
       });
+      await ingestCallOrMeetingNotes(app.db, {
+        personId: row.id,
+        personEmail: row.email,
+        keyHex: app.env.EMAIL_HASH_KEY,
+        resumeStorageDir: app.env.RESUME_STORAGE_DIR,
+        kind: current.kind,
+        notes: plan.notes,
+        taskId: updated.id,
+        actor,
+      });
+      if (current.kind === "call") {
+        await enqueuePersonScore(app.queues, {
+          personId: row.id,
+          trigger: "call_held",
+          computedBy: actor.id,
+        });
+      } else if (current.kind === "meeting") {
+        await enqueuePersonScore(app.queues, {
+          personId: row.id,
+          trigger: "meeting_held",
+          computedBy: actor.id,
+        });
+      }
       return taskSchema.parse(serializeTask(updated));
     },
   );
@@ -891,7 +1131,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
     "/people/:id/tasks/:taskId",
     {
       schema: {
-        params: z.object({ id: uuidSchema, taskId: uuidSchema }),
+        params: taskIdParamsSchema,
         response: { 200: okResponseSchema },
       },
     },
@@ -947,6 +1187,18 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const row = await requirePerson(app.db, req.params.id);
       const deletedAt = new Date();
+      if (row.doNotContact) {
+        await writeSuppression(app.db, {
+          email: row.email,
+          keyHex: app.env.EMAIL_HASH_KEY,
+          reason: "do_not_contact",
+          source: "operator",
+          occurredAt: deletedAt,
+          createdBy: actor.id,
+          actorEmail: actor.email,
+          personId: row.id,
+        });
+      }
       await app.db
         .update(people)
         .set({ deletedAt })

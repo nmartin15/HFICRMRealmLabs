@@ -10,6 +10,7 @@ import {
 import { eq } from "drizzle-orm";
 import {
   allocationCards,
+  findPersonByEmail,
   incubatorCards,
   people,
   tasks,
@@ -18,6 +19,7 @@ import {
 import type { AuthedUser } from "../plugins/auth.js";
 import { httpError } from "../plugins/error.js";
 import { writeActivity } from "./activity.js";
+import { suppressionReasonForEmail, writeSuppression } from "./suppression.js";
 
 type ApplicantBody = CreateApplicantPersonBody & {
   applicationRef?: string;
@@ -37,14 +39,10 @@ export async function createManualApplicant(
   actor: AuthedUser,
   pipeline: ApplicantPipeline,
   body: ApplicantBody,
+  emailHashKey: string,
 ): Promise<CreateApplicantResponse> {
   const email = body.email;
-  const existingRows = await db
-    .select()
-    .from(people)
-    .where(eq(people.email, email))
-    .limit(1);
-  const existingPerson = existingRows[0] ?? null;
+  const existingPerson = await findPersonByEmail(db, email);
 
   let existing: PlanManualApplicantExisting | null = null;
   if (existingPerson) {
@@ -74,6 +72,9 @@ export async function createManualApplicant(
     name: body.name,
     existing,
     applicationRef: body.applicationRef,
+    suppressed: Boolean(
+      await suppressionReasonForEmail(db, email, emailHashKey),
+    ),
   });
   if (!plan.ok) {
     throw httpError(plan.status, plan.code, plan.message);
@@ -211,10 +212,16 @@ export async function createManualApplicant(
         createdBy: actor.id,
       });
       if (taskPlan.setDoNotContact) {
-        await tx
-          .update(people)
-          .set({ doNotContact: true, programTrack: null })
-          .where(eq(people.id, personId));
+        await writeSuppression(typedTx, {
+          email,
+          keyHex: emailHashKey,
+          reason: "do_not_contact",
+          source: "operator",
+          occurredAt: when,
+          createdBy: actor.id,
+          actorEmail: actor.email,
+          personId,
+        });
       }
       await writeActivity(typedTx, {
         personId,

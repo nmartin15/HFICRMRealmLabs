@@ -101,6 +101,7 @@ export type PlanWebsiteLeadResult =
       ensureAllocationCard: boolean;
       setProgramTrackAllocation: boolean;
     }
+  | { ok: true; action: "ignored" }
   | { ok: false; status: 400; code: string; message: string };
 
 export function planWebsiteLead(input: {
@@ -110,10 +111,15 @@ export function planWebsiteLead(input: {
   yearsExperience?: number;
   existing: PlanWebsiteLeadExisting | null;
   existingNotes: string | null;
+  suppressed?: boolean;
 }): PlanWebsiteLeadResult {
   const names = splitName(input.name);
   if ("error" in names) {
     return { ok: false, status: 400, code: "INVALID_NAME", message: names.error };
+  }
+
+  if (input.suppressed || input.existing?.doNotContact) {
+    return { ok: true, action: "ignored" };
   }
 
   if (!input.existing) {

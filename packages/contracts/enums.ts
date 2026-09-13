@@ -31,6 +31,31 @@ export type ProgramInterest = z.infer<typeof programInterestSchema>;
 export const leadTempSchema = z.enum(["cold", "lukewarm", "warm", "hot"]);
 export type LeadTemp = z.infer<typeof leadTempSchema>;
 
+export const operatorWarmthLevelSchema = z.enum([
+  "skeptical",
+  "watch",
+  "pursue",
+  "priority",
+]);
+export type OperatorWarmthLevel = z.infer<typeof operatorWarmthLevelSchema>;
+
+export const OPERATOR_WARMTH_LABELS: Record<OperatorWarmthLevel, string> = {
+  skeptical: "Skeptical",
+  watch: "Watch",
+  pursue: "Pursue",
+  priority: "Priority",
+};
+
+export const LEAD_TEMP_TO_OPERATOR_WARMTH: Record<
+  LeadTemp,
+  OperatorWarmthLevel
+> = {
+  cold: "skeptical",
+  lukewarm: "watch",
+  warm: "pursue",
+  hot: "priority",
+};
+
 export const budgetQualifiedSchema = z.enum([
   "light",
   "heavy",
@@ -101,6 +126,67 @@ export const activityTypeSchema = z.enum([
   "webhook",
 ]);
 export type ActivityType = z.infer<typeof activityTypeSchema>;
+
+export const suppressionReasonSchema = z.enum([
+  "unsubscribed",
+  "complained",
+  "hard_bounced",
+  "do_not_contact",
+  "rejected",
+  "enrolled",
+]);
+export type SuppressionReason = z.infer<typeof suppressionReasonSchema>;
+
+export const suppressionSourceSchema = z.enum([
+  "operator",
+  "gmail",
+  "website_form",
+  "import",
+  "bounce",
+  "stripe",
+  "postmark",
+  "one_click",
+]);
+export type SuppressionSource = z.infer<typeof suppressionSourceSchema>;
+
+export const consentChannelSchema = z.enum([
+  "inquiry",
+  "newsletter",
+  "stay_in_touch",
+]);
+export type ConsentChannel = z.infer<typeof consentChannelSchema>;
+
+export const consentStatusSchema = z.enum(["granted", "withdrawn"]);
+export type ConsentStatus = z.infer<typeof consentStatusSchema>;
+
+export const consentSourceSchema = z.enum([
+  "website_form",
+  "operator",
+  "import",
+  "email_link",
+]);
+export type ConsentSource = z.infer<typeof consentSourceSchema>;
+
+export const personSignalKindSchema = z.enum([
+  "aum_or_budget",
+  "warmth",
+  "decision_timeline",
+  "program_fit",
+  "objection",
+  "other",
+]);
+export type PersonSignalKind = z.infer<typeof personSignalKindSchema>;
+
+export const personSignalSourceSchema = z.enum([
+  "email_message",
+  "task",
+  "meeting",
+  "activity_note",
+  "website_lead",
+  "import",
+  "operator",
+]);
+export type PersonSignalSource = z.infer<typeof personSignalSourceSchema>;
 
 export const isoDateSchema = z.iso.date();
 export const isoDateTimeSchema = z.iso.datetime();

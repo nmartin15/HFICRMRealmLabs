@@ -12,11 +12,14 @@ import {
   personFieldsChanged,
   planImportAllocation,
   planImportIncubator,
+  planImportLeadTemp,
   previewImportCounts,
+  warmthSignalValueSchema,
   type ImportExistingPerson,
   type ImportMappedRow,
   type ImportPersonFields,
   type ImportPreviewRow,
+  type SuppressionReason,
 } from "@realm-labs/contracts";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { eq, inArray } from "drizzle-orm";
@@ -24,10 +27,14 @@ import {
   allocationCards,
   incubatorCards,
   people,
+  personScoreSnapshots,
+  personSignals,
   tasks,
   type Database,
 } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
+import { loadSuppressionReasons, writeSuppression } from "../lib/suppression.js";
+import { enqueuePersonScore } from "../lib/score-enqueue.js";
 import type { AuthedUser } from "../plugins/auth.js";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
@@ -163,15 +170,17 @@ async function commitRow(
     actor: AuthedUser;
     filename: string;
     now: Date;
+    emailHashKey: string;
+    hasSnapshot: boolean;
     existingPerson: PersonRow | null;
     existingAllocation: AllocationRow | null;
     existingIncubator: IncubatorRow | null;
     existingTasks: TaskRow[];
   },
-): Promise<void> {
+): Promise<string | null> {
   const incoming = input.mapped.person;
   if (!incoming) {
-    return;
+    return null;
   }
 
   const actor = input.actor;
@@ -223,6 +232,18 @@ async function commitRow(
       throw httpError(500, "INTERNAL", "Failed to create person");
     }
     personId = created.id;
+    if (allocationPlan.doNotContact) {
+      await writeSuppression(db, {
+        email: incoming.email,
+        keyHex: input.emailHashKey,
+        reason: "do_not_contact",
+        source: "import",
+        occurredAt: now,
+        createdBy: actor.id,
+        actorEmail: actor.email,
+        personId,
+      });
+    }
   } else {
     const existing = input.existingPerson;
     if (!existing) {
@@ -231,6 +252,12 @@ async function commitRow(
     personId = existing.id;
     personBefore = toPersonFields(existing);
     personAfter = fillBlankPersonFields(personBefore, incoming);
+    const plannedTemp = planImportLeadTemp({
+      hasSnapshot: input.hasSnapshot,
+      existingLeadTemp: existing.leadTemp,
+      incomingLeadTemp: incoming.leadTemp,
+    });
+    personAfter = { ...personAfter, leadTemp: plannedTemp.leadTemp };
     const fieldsChanged = personFieldsChanged(personBefore, personAfter);
     const dncChanged = previousDoNotContact !== allocationPlan.doNotContact;
     if (fieldsChanged || dncChanged) {
@@ -248,6 +275,44 @@ async function commitRow(
           doNotContact: allocationPlan.doNotContact,
         })
         .where(eq(people.id, personId));
+    }
+    if (dncChanged && allocationPlan.doNotContact) {
+      await writeSuppression(db, {
+        email: existing.email,
+        keyHex: input.emailHashKey,
+        reason: "do_not_contact",
+        source: "import",
+        occurredAt: now,
+        createdBy: actor.id,
+        actorEmail: actor.email,
+        personId,
+      });
+    }
+    if (plannedTemp.warmth) {
+      const at = now.getTime();
+      await db.insert(personSignals).values({
+        personId,
+        kind: "warmth",
+        value: warmthSignalValueSchema.parse({
+          level: plannedTemp.warmth,
+          at,
+        }),
+        excerpt: `import ${plannedTemp.warmth}`,
+        sourceType: "import",
+        extractor: "import",
+      });
+      await writeActivity(db, {
+        personId,
+        userId: actor.id,
+        type: "field_change",
+        payload: {
+          who,
+          what: "signal.import_warmth",
+          when: nowIso,
+          before: null,
+          after: { level: plannedTemp.warmth },
+        },
+      });
     }
   }
 
@@ -512,14 +577,21 @@ async function commitRow(
       },
     });
   }
+
+  return personId;
 }
 
 function previewFromMapped(
   mapped: ImportMappedRow[],
   existing: ImportExistingPerson[],
   filename: string,
+  suppressions: ReadonlyMap<string, SuppressionReason> = new Map(),
 ) {
-  const rows: ImportPreviewRow[] = assignImportActions(mapped, existing);
+  const rows: ImportPreviewRow[] = assignImportActions(
+    mapped,
+    existing,
+    suppressions,
+  );
   return importPreviewResponseSchema.parse({
     filename,
     rows,
@@ -545,11 +617,19 @@ export const importRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const filename = importSourceFilename(req.body.filename);
       const mapped = parseOrThrow(filename, req.body.content);
-      const loaded = await loadExistingByEmail(
+      const emails = uniqueEmails(mapped);
+      const loaded = await loadExistingByEmail(app.db, emails);
+      const suppressions = await loadSuppressionReasons(
         app.db,
-        uniqueEmails(mapped),
+        emails,
+        app.env.EMAIL_HASH_KEY,
       );
-      return previewFromMapped(mapped, previewPeople(loaded.people), filename);
+      return previewFromMapped(
+        mapped,
+        previewPeople(loaded.people),
+        filename,
+        suppressions,
+      );
     },
   );
 
@@ -570,18 +650,40 @@ export const importRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const filename = importSourceFilename(req.body.filename);
       const mapped = parseOrThrow(filename, req.body.content);
-      const loaded = await loadExistingByEmail(
+      const emails = uniqueEmails(mapped);
+      const loaded = await loadExistingByEmail(app.db, emails);
+      const suppressions = await loadSuppressionReasons(
         app.db,
-        uniqueEmails(mapped),
+        emails,
+        app.env.EMAIL_HASH_KEY,
       );
-      const preview = assignImportActions(mapped, previewPeople(loaded.people));
+      const preview = assignImportActions(
+        mapped,
+        previewPeople(loaded.people),
+        suppressions,
+      );
       const peopleByEmail = new Map(
         loaded.people.map((row) => [row.email, row] as const),
       );
+      const snapshotPersonIds = new Set<string>();
+      if (loaded.people.length > 0) {
+        const snapshotRows = await app.db
+          .select({ personId: personScoreSnapshots.personId })
+          .from(personScoreSnapshots)
+          .where(
+            inArray(
+              personScoreSnapshots.personId,
+              loaded.people.map((row) => row.id),
+            ),
+          );
+        for (const row of snapshotRows) {
+          snapshotPersonIds.add(row.personId);
+        }
+      }
       const now = new Date();
-
-      await app.db.transaction(async (tx) => {
+      const scoredIds = await app.db.transaction(async (tx) => {
         const db = tx as unknown as Database;
+        const ids: string[] = [];
         for (let i = 0; i < mapped.length; i += 1) {
           const row = mapped[i];
           const action = preview[i]?.action;
@@ -590,12 +692,16 @@ export const importRoutes: FastifyPluginAsyncZod = async (app) => {
           }
           const email = row.person?.email;
           const existingPerson = email ? (peopleByEmail.get(email) ?? null) : null;
-          await commitRow(db, {
+          const personId = await commitRow(db, {
             mapped: row,
             action,
             actor,
             filename,
             now,
+            emailHashKey: app.env.EMAIL_HASH_KEY,
+            hasSnapshot: existingPerson
+              ? snapshotPersonIds.has(existingPerson.id)
+              : false,
             existingPerson,
             existingAllocation: existingPerson
               ? (loaded.allocationByPerson.get(existingPerson.id) ?? null)
@@ -607,8 +713,20 @@ export const importRoutes: FastifyPluginAsyncZod = async (app) => {
               ? (loaded.tasksByPerson.get(existingPerson.id) ?? [])
               : [],
           });
+          if (personId) {
+            ids.push(personId);
+          }
         }
+        return ids;
       });
+
+      for (const personId of scoredIds) {
+        await enqueuePersonScore(app.queues, {
+          personId,
+          trigger: "import",
+          computedBy: actor.id,
+        });
+      }
 
       return importCommitResponseSchema.parse({
         filename,

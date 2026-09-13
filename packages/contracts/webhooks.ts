@@ -58,7 +58,7 @@ export type ApplicationWebhookBody = z.infer<typeof applicationWebhookBodySchema
 export const applicationWebhookResponseSchema = z.object({
   received: z.literal(true),
   idempotent: z.boolean(),
-  personId: uuidSchema,
+  personId: uuidSchema.nullable(),
   incubatorCardId: uuidSchema.nullable(),
   needsReview: z.boolean(),
 });
@@ -164,12 +164,14 @@ export type ApplicationWebhookDecision =
       cardId: string | null;
       fromStage: IncubatorStage | null;
       needsReview: true;
-    };
+    }
+  | { action: "ignored" };
 
 export function decideApplicationWebhook(input: {
   applicationRef: string;
   cardByRef: WebhookCard | null;
   personByEmail: WebhookPerson | null;
+  suppressed?: boolean;
 }): ApplicationWebhookDecision {
   if (input.cardByRef) {
     return {
@@ -180,9 +182,17 @@ export function decideApplicationWebhook(input: {
     };
   }
 
+  if (input.suppressed && !input.personByEmail) {
+    return { action: "ignored" };
+  }
+
   const person = input.personByEmail;
   if (!person) {
     return { action: "create", needsReview: true };
+  }
+
+  if (input.suppressed) {
+    return { action: "ignored" };
   }
 
   const card = person.incubatorCard;

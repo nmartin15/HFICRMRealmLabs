@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 
 const ALLOWED_RESUME_TYPES = new Set([
@@ -55,6 +55,13 @@ export async function saveResumeFile(input: {
   const storedName = `resume${extensionFor(input.filename, input.contentType)}`;
   await writeFile(join(dir, storedName), input.bytes);
   return storedName;
+}
+
+export async function deleteResumeDir(
+  storageDir: string,
+  personId: string,
+): Promise<void> {
+  await rm(join(storageDir, personId), { recursive: true, force: true });
 }
 
 export async function readResumeFile(input: {

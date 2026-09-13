@@ -69,7 +69,7 @@ const authPlugin: FastifyPluginAsync = async (app) => {
 
     await loadUser(req);
 
-    if (PUBLIC_API_PATHS.has(path) || path.startsWith("/api/webhooks/") || path.startsWith("/api/leads/")) {
+    if (PUBLIC_API_PATHS.has(path) || path.startsWith("/api/webhooks/") || path.startsWith("/api/leads/") || path.startsWith("/api/unsubscribe/") || path === "/api/campaign-tags" || path === "/api/sends") {
       return;
     }
 

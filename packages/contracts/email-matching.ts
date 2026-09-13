@@ -109,11 +109,57 @@ export function emailSnippet(text: string): string {
 export type PersonEmailMatch = {
   id: string;
   email: string;
+  emails?: readonly string[];
 };
 
+export function personMatchEmails(person: PersonEmailMatch): string[] {
+  return uniqueEmails([person.email, ...(person.emails ?? [])]);
+}
+
+export function personHasEmail(
+  person: PersonEmailMatch,
+  candidate: string,
+): boolean {
+  return personMatchEmails(person).some((email) => emailsMatch(email, candidate));
+}
+
+export function collectPersonEmails(input: {
+  personEmail?: string | null;
+  personEmails?: readonly string[] | null;
+}): string[] {
+  return uniqueEmails([
+    ...(input.personEmail ? [input.personEmail] : []),
+    ...(input.personEmails ?? []),
+  ]);
+}
+
+export function addressedToMailbox(
+  toEmails: readonly string[] | undefined,
+  ccEmails: readonly string[] | undefined,
+  mailboxAddresses: readonly string[] = mailboxEmails(),
+): boolean {
+  return [...(toEmails ?? []), ...(ccEmails ?? [])].some((email) =>
+    isMailboxAddress(email, mailboxAddresses),
+  );
+}
+
+export function personIsRecipient(
+  toEmails: readonly string[] | undefined,
+  ccEmails: readonly string[] | undefined,
+  personEmails: readonly string[],
+): boolean {
+  if (personEmails.length === 0) {
+    return false;
+  }
+  return [...(toEmails ?? []), ...(ccEmails ?? [])].some((email) =>
+    personEmails.some((known) => emailsMatch(known, email)),
+  );
+}
+
 /**
- * First participant that matches a person, skipping our mailbox addresses.
- * Matching is case-insensitive and ignores plus addressing on either side.
+ * First participant that matches a person (primary or alternate), skipping
+ * our mailbox addresses. Matching is case-insensitive and ignores plus
+ * addressing on either side.
  */
 export function matchPersonFromParticipants(
   participantEmails: readonly string[],
@@ -124,7 +170,7 @@ export function matchPersonFromParticipants(
     if (isMailboxAddress(participant, mailboxAddresses)) {
       continue;
     }
-    const person = people.find((row) => emailsMatch(row.email, participant));
+    const person = people.find((row) => personHasEmail(row, participant));
     if (person) {
       return person;
     }
@@ -132,33 +178,79 @@ export function matchPersonFromParticipants(
   return null;
 }
 
+/**
+ * Record a From address as an alternate when the person wrote to us from it.
+ * Skip when the person is a recipient — that From is someone else on the
+ * thread (forward or operator writing from a non-mailbox address).
+ */
+export function alternateEmailToRecord(input: {
+  fromEmail: string;
+  toEmails?: readonly string[];
+  ccEmails?: readonly string[];
+  personEmails: readonly string[];
+  mailboxAddresses?: readonly string[];
+}): string | null {
+  const fromEmail = input.fromEmail.trim();
+  if (!fromEmail) {
+    return null;
+  }
+  const mailboxes = input.mailboxAddresses ?? mailboxEmails();
+  if (isMailboxAddress(fromEmail, mailboxes)) {
+    return null;
+  }
+  if (input.personEmails.some((email) => emailsMatch(email, fromEmail))) {
+    return null;
+  }
+  if (!addressedToMailbox(input.toEmails, input.ccEmails, mailboxes)) {
+    return null;
+  }
+  if (personIsRecipient(input.toEmails, input.ccEmails, input.personEmails)) {
+    return null;
+  }
+  return canonicalEmail(fromEmail);
+}
+
 export function isInboundFromPerson(
   latestFrom: string | null,
-  personEmail: string,
+  personEmail: string | readonly string[],
   mailboxAddresses: readonly string[] = mailboxEmails(),
 ): boolean {
   if (!latestFrom) {
     return false;
   }
-  if (isMailboxAddress(latestFrom, mailboxAddresses)) {
-    return false;
-  }
-  return emailsMatch(latestFrom, personEmail);
+  return (
+    emailMessageDirection({
+      fromEmail: latestFrom,
+      personEmails: Array.isArray(personEmail) ? personEmail : [personEmail],
+      mailboxAddresses,
+    }) === "inbound"
+  );
 }
 
 export function isInboundReply(input: {
   latestFrom: string | null;
-  personEmail: string;
+  personEmail?: string | null;
+  personEmails?: readonly string[] | null;
   messageCount: number;
   inReplyTo: string | null;
   mailboxAddresses?: readonly string[];
+  toEmails?: readonly string[];
+  ccEmails?: readonly string[];
+  threadMatched?: boolean;
 }): boolean {
+  if (!input.latestFrom) {
+    return false;
+  }
   if (
-    !isInboundFromPerson(
-      input.latestFrom,
-      input.personEmail,
-      input.mailboxAddresses ?? mailboxEmails(),
-    )
+    emailMessageDirection({
+      fromEmail: input.latestFrom,
+      personEmail: input.personEmail,
+      personEmails: input.personEmails,
+      mailboxAddresses: input.mailboxAddresses,
+      toEmails: input.toEmails,
+      ccEmails: input.ccEmails,
+      threadMatched: input.threadMatched,
+    }) !== "inbound"
   ) {
     return false;
   }
@@ -170,8 +262,12 @@ export function isInboundReply(input: {
 
 export function emailMessageDirection(input: {
   fromEmail: string;
-  personEmail: string | null;
+  personEmail?: string | null;
+  personEmails?: readonly string[] | null;
   mailboxAddresses?: readonly string[];
+  toEmails?: readonly string[];
+  ccEmails?: readonly string[];
+  threadMatched?: boolean;
 }): EmailMessageDirection {
   const mailboxes = input.mailboxAddresses ?? mailboxEmails();
   if (!input.fromEmail.trim()) {
@@ -180,7 +276,19 @@ export function emailMessageDirection(input: {
   if (isMailboxAddress(input.fromEmail, mailboxes)) {
     return "outbound";
   }
-  if (input.personEmail && emailsMatch(input.fromEmail, input.personEmail)) {
+  const personEmails = collectPersonEmails(input);
+  if (personEmails.some((email) => emailsMatch(input.fromEmail, email))) {
+    return "inbound";
+  }
+  // Thread already matched: a non-mailbox From addressed to our mailbox,
+  // where the person is not a recipient, is them writing from another
+  // address (or a forward into the thread). If they are a recipient, From
+  // is someone else — operator aliases outside MAILBOX_ADDRESSES stay other.
+  if (
+    input.threadMatched &&
+    addressedToMailbox(input.toEmails, input.ccEmails, mailboxes) &&
+    !personIsRecipient(input.toEmails, input.ccEmails, personEmails)
+  ) {
     return "inbound";
   }
   return "other";

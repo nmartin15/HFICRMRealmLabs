@@ -6,6 +6,7 @@ const base = {
   SESSION_SECRET: "dev-session-secret-change-me-32chars",
   ADMIN_EMAIL: "nathan@realmlabs.co",
   TOKEN_ENCRYPTION_KEY: "a".repeat(64),
+  EMAIL_HASH_KEY: "b".repeat(64),
 };
 
 describe("loadEnv stripe flag", () => {
@@ -29,5 +30,23 @@ describe("loadEnv stripe flag", () => {
 
   it("defaults RESUME_STORAGE_DIR to data/resumes", () => {
     expect(loadEnv(base).RESUME_STORAGE_DIR).toBe("data/resumes");
+  });
+
+  it("rejects EMAIL_HASH_KEY that is not 64 hex characters", () => {
+    expect(() => loadEnv({ ...base, EMAIL_HASH_KEY: "z".repeat(64) })).toThrow();
+  });
+
+  it("defaults POSTMARK_SEND_ENABLED off and requires mail.realmlabs.co", () => {
+    expect(loadEnv(base).POSTMARK_SEND_ENABLED).toBe(false);
+    expect(loadEnv(base).CAMPAIGN_FROM_EMAIL).toBe("hello@mail.realmlabs.co");
+    for (const from of [
+      "nathan@realmlabs.co",
+      "stefano@realmlabs.co",
+      "anyone@realmlabs.co",
+    ]) {
+      expect(() => loadEnv({ ...base, CAMPAIGN_FROM_EMAIL: from })).toThrow(
+        /mail\.realmlabs\.co/,
+      );
+    }
   });
 });

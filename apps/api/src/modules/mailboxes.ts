@@ -20,6 +20,7 @@ import {
   encodeMailboxState,
 } from "../lib/mailbox-oauth.js";
 import { removeMailboxSync } from "../lib/queues.js";
+import { writeActivity } from "../lib/activity.js";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
 
@@ -130,6 +131,19 @@ export const mailboxRoutes: FastifyPluginAsyncZod = async (app) => {
       await app.db
         .delete(mailboxConnections)
         .where(eq(mailboxConnections.mailbox, req.params.mailbox));
+
+      await writeActivity(app.db, {
+        personId: null,
+        userId: actor.id,
+        type: "field_change",
+        payload: {
+          who: { id: actor.id, email: actor.email },
+          what: "mailbox.disconnect",
+          when: new Date().toISOString(),
+          before: { mailbox: req.params.mailbox, connected: true },
+          after: { mailbox: req.params.mailbox, connected: false },
+        },
+      });
 
       try {
         await removeMailboxSync(app.queues, req.params.mailbox);
