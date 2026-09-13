@@ -56,6 +56,19 @@ function errorReasons(err: unknown): string[] {
   });
 }
 
+export function isMissingGmailEntity(err: unknown): boolean {
+  const status = errorStatus(err);
+  const message = errorMessage(err).toLowerCase();
+  const reasons = errorReasons(err);
+  if (status === 404) {
+    return true;
+  }
+  return (
+    reasons.includes("notFound") ||
+    message.includes("requested entity was not found")
+  );
+}
+
 export function isGmailRateLimit(err: unknown): boolean {
   const status = errorStatus(err);
   const message = errorMessage(err).toLowerCase();

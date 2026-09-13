@@ -3,7 +3,34 @@ import {
   GmailQuotaPausedError,
   gmailRetryDelayMs,
   isGmailRateLimit,
+  isMissingGmailEntity,
 } from "./gmail-rate-limit.js";
+
+describe("isMissingGmailEntity", () => {
+  it("detects Gmail threads.get 404", () => {
+    expect(
+      isMissingGmailEntity({
+        status: 404,
+        code: 404,
+        message: "Requested entity was not found.",
+        errors: [{ reason: "notFound" }],
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores quota and auth failures", () => {
+    expect(
+      isMissingGmailEntity({
+        status: 403,
+        message: "Quota exceeded",
+        errors: [{ reason: "rateLimitExceeded" }],
+      }),
+    ).toBe(false);
+    expect(isMissingGmailEntity({ status: 401, message: "Invalid Credentials" })).toBe(
+      false,
+    );
+  });
+});
 
 describe("isGmailRateLimit", () => {
   it("detects 429", () => {

@@ -41,6 +41,7 @@ import {
   GmailQuotaPausedError,
   callGmail,
   createGmailQuotaBudget,
+  isMissingGmailEntity,
   type GmailQuotaBudget,
 } from "../lib/gmail-rate-limit.js";
 import { googleClientFromRefreshToken } from "../lib/google.js";
@@ -487,18 +488,25 @@ async function getGmailThread(
   threadId: string,
   format: "metadata" | "full",
   budget: GmailQuotaBudget,
-): Promise<gmail_v1.Schema$Thread> {
-  return callGmail(
-    async () => {
-      const { data } = await gmail.users.threads.get({
-        userId: "me",
-        id: threadId,
-        format,
-      });
-      return data;
-    },
-    budget,
-  );
+): Promise<gmail_v1.Schema$Thread | null> {
+  try {
+    return await callGmail(
+      async () => {
+        const { data } = await gmail.users.threads.get({
+          userId: "me",
+          id: threadId,
+          format,
+        });
+        return data;
+      },
+      budget,
+    );
+  } catch (err) {
+    if (isMissingGmailEntity(err)) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 function sortGmailMessages(
@@ -534,6 +542,9 @@ async function processGmailThread(
     "metadata",
     input.budget,
   );
+  if (!data) {
+    return;
+  }
 
   const messages = data.messages ?? [];
   if (messages.length === 0) {
@@ -593,6 +604,9 @@ async function processGmailThread(
     "full",
     input.budget,
   );
+  if (!full) {
+    return;
+  }
   const bodies = sortGmailMessages(full.messages ?? []);
   const latestFull = bodies[bodies.length - 1];
   const latestBody = extractGmailPlainText(latestFull?.payload);
