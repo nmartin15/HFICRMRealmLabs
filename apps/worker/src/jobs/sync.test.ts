@@ -22,6 +22,19 @@ describe("gmail sync job", () => {
     );
   });
 
+  it("does not treat a missing historyId as a finished Gmail pass", () => {
+    expect(source).not.toContain(
+      "historyProcessingComplete = !connection.gmailHistoryId",
+    );
+    expect(source).toContain("let historyProcessingComplete = false;");
+  });
+
+  it("does not let calendar success clear Gmail lastError or lastSyncedAt", () => {
+    expect(source).not.toMatch(
+      /lastError: null, lastSyncedAt: new Date\(\)/,
+    );
+  });
+
   it("does not skip history-changed threads during a contact backfill", () => {
     expect(source).toContain("shouldProcessGmailThreadId");
     expect(source).toContain("gmailSyncPlan");

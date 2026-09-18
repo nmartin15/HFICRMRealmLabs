@@ -705,7 +705,10 @@ export async function runGmailSync(
   }
 
   let checkpoint: string | null = null;
-  let historyProcessingComplete = !connection.gmailHistoryId;
+  // False until every listed thread is processed. A missing historyId means
+  // contact backfill is still in progress — treating that as complete lets a
+  // quota pause persist getProfile's current historyId and skip the rest.
+  let historyProcessingComplete = false;
 
   try {
     const refreshToken = decryptSecret(
@@ -747,13 +750,11 @@ export async function runGmailSync(
           budget,
         );
         historyThreadIds = changed.threadIds;
-        historyProcessingComplete = historyThreadIds.length === 0;
       } catch (err) {
         if (!isStaleHistory(err)) {
           throw err;
         }
         historyStale = true;
-        historyProcessingComplete = true;
       }
     }
 
@@ -804,6 +805,9 @@ export async function runGmailSync(
       });
     }
     historyProcessingComplete = true;
+    console.log(
+      `gmail.sync ${mailbox} history=${historyThreadIds.length} backfill=${backfillIds.length} listed=${threadIds.length}`,
+    );
 
     await markSyncOk(db, mailbox, checkpoint);
   } catch (err) {
@@ -1202,10 +1206,8 @@ export async function runCalendarSync(
       }
     }
 
-    await db
-      .update(mailboxConnections)
-      .set({ lastError: null, lastSyncedAt: new Date() })
-      .where(eq(mailboxConnections.mailbox, mailbox));
+    // Gmail owns lastSyncedAt / lastError on this row. Calendar success
+    // must not hide a stalled Gmail checkpoint.
   } catch (err) {
     if (isMissingGmailEntity(err)) {
       return;
