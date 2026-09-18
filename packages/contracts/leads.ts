@@ -82,7 +82,6 @@ export type PlanWebsiteLeadExisting = {
   id: string;
   doNotContact: boolean;
   deleted: boolean;
-  hasAllocationCard: boolean;
 };
 
 export type PlanWebsiteLeadResult =
@@ -98,8 +97,7 @@ export type PlanWebsiteLeadResult =
       action: "update";
       personId: string;
       notes: string | null;
-      ensureAllocationCard: boolean;
-      setProgramTrackAllocation: boolean;
+      restoreDeleted: boolean;
     }
   | { ok: true; action: "ignored" }
   | { ok: false; status: 400; code: string; message: string };
@@ -141,11 +139,6 @@ export function planWebsiteLead(input: {
     action: "update",
     personId: input.existing.id,
     notes: appendWebsiteLeadMessage(input.existingNotes, input.message),
-    ensureAllocationCard:
-      !input.existing.hasAllocationCard &&
-      !input.existing.doNotContact &&
-      !input.existing.deleted,
-    setProgramTrackAllocation:
-      !input.existing.doNotContact && !input.existing.deleted,
+    restoreDeleted: input.existing.deleted,
   };
 }

@@ -5,7 +5,11 @@ import * as schema from "./schema";
 export type Database = PostgresJsDatabase<typeof schema>;
 
 export function createDb(url: string): { db: Database; client: Sql } {
-  const client = postgres(url);
+  const client = postgres(url, {
+    max: 10,
+    connect_timeout: 10,
+    idle_timeout: 20,
+  });
   const db = drizzle(client, { schema });
   return { db, client };
 }

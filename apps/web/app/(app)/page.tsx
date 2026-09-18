@@ -344,6 +344,8 @@ export default function HomePage() {
                 item.personId ? (
                   <CompleteTaskForm
                     task={{ id: item.taskId, kind: "meeting", notes: null }}
+                    requireFollowUp={false}
+                    hasExistingFollowUp={item.hasOpenFollowUp}
                     onCancel={() => setCompletingId(null)}
                     onSubmit={(body) => {
                       const personId = item.personId;

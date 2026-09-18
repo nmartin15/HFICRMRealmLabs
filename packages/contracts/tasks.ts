@@ -10,6 +10,7 @@ import {
   type TaskStatus,
 } from "./enums";
 import { HAND_SET_MEETING_OUTCOMES, handSetMeetingOutcomeSchema } from "./meetings";
+import { zonedIsoDate } from "./time";
 
 export const TASK_KIND_LABELS: Record<TaskKind, string> = {
   email: "Email",
@@ -98,18 +99,97 @@ export type PlanCreateTaskSuccess = {
   setDoNotContact: boolean;
 };
 
+export type OpenTaskSibling = {
+  id: string;
+  kind: TaskKind;
+  dueAt: string;
+  calendarEventId: string | null;
+};
+
 export type PlanCompleteTaskSuccess = {
   ok: true;
   notes: string | null;
   setDoNotContact: boolean;
   status: Extract<TaskStatus, "done" | "rescheduled">;
   outcome: MeetingOutcome | null;
+  closeDuplicateIds: string[];
   next: {
     kind: TaskKind;
     dueAt: string;
     notes: string | null;
   } | null;
 };
+
+export function remainingOpenFollowUpCount(input: {
+  otherOpenTaskCount?: number;
+  otherOpenTasks?: OpenTaskSibling[];
+  closeDuplicateIds?: string[];
+}): number {
+  const duplicateSet = new Set(input.closeDuplicateIds ?? []);
+  if (input.otherOpenTasks !== undefined) {
+    return input.otherOpenTasks.filter((task) => !duplicateSet.has(task.id)).length;
+  }
+  return input.otherOpenTaskCount ?? 0;
+}
+
+export function hasExistingOpenFollowUp(input: {
+  currentId: string;
+  currentKind: TaskKind;
+  currentDueAt: string;
+  currentCalendarEventId: string | null;
+  otherOpenTasks: OpenTaskSibling[];
+}): boolean {
+  return (
+    remainingOpenFollowUpCount({
+      otherOpenTasks: input.otherOpenTasks,
+      closeDuplicateIds: sameDayOpenMeetingDuplicates({
+        currentId: input.currentId,
+        currentKind: input.currentKind,
+        currentDueAt: input.currentDueAt,
+        currentCalendarEventId: input.currentCalendarEventId,
+        siblings: input.otherOpenTasks,
+      }),
+    }) > 0
+  );
+}
+
+export function sameDayOpenMeetingDuplicates(input: {
+  currentId: string;
+  currentKind: TaskKind;
+  currentDueAt: string;
+  currentCalendarEventId: string | null;
+  siblings: OpenTaskSibling[];
+}): string[] {
+  if (input.currentKind !== "meeting") {
+    return [];
+  }
+  const currentMs = Date.parse(input.currentDueAt);
+  if (!Number.isFinite(currentMs)) {
+    return [];
+  }
+  const currentDay = zonedIsoDate(new Date(currentMs));
+  const ids: string[] = [];
+  for (const sibling of input.siblings) {
+    if (sibling.kind !== "meeting" || sibling.id === input.currentId) {
+      continue;
+    }
+    if (
+      input.currentCalendarEventId &&
+      sibling.calendarEventId === input.currentCalendarEventId
+    ) {
+      ids.push(sibling.id);
+      continue;
+    }
+    const siblingMs = Date.parse(sibling.dueAt);
+    if (!Number.isFinite(siblingMs)) {
+      continue;
+    }
+    if (zonedIsoDate(new Date(siblingMs)) === currentDay) {
+      ids.push(sibling.id);
+    }
+  }
+  return ids;
+}
 
 function fail(
   status: 400 | 409,
@@ -211,14 +291,18 @@ export function planUpdateTask(input: {
 }
 
 export function planCompleteTask(input: {
+  currentId?: string;
   currentKind: TaskKind;
   currentStatus: string;
+  currentDueAt?: string;
+  currentCalendarEventId?: string | null;
   notes: string | null | undefined;
   outcome: (typeof HAND_SET_MEETING_OUTCOMES)[number] | undefined;
   next: { kind: TaskKind; dueAt: string; notes?: string } | undefined;
   personDoNotContact: boolean;
   personDeleted: boolean;
   otherOpenTaskCount?: number;
+  otherOpenTasks?: OpenTaskSibling[];
 }): PlanCompleteTaskSuccess | PlanTaskWriteError {
   if (input.personDeleted) {
     return fail(409, "PERSON_DELETED", "Person is deleted");
@@ -229,6 +313,13 @@ export function planCompleteTask(input: {
 
   const notes = notesOrNull(input.notes);
   const isDnc = input.currentKind === "dnc";
+  const closeDuplicateIds = sameDayOpenMeetingDuplicates({
+    currentId: input.currentId ?? "",
+    currentKind: input.currentKind,
+    currentDueAt: input.currentDueAt ?? "",
+    currentCalendarEventId: input.currentCalendarEventId ?? null,
+    siblings: input.otherOpenTasks ?? [],
+  });
 
   if (isDnc) {
     if (!notes) {
@@ -240,6 +331,7 @@ export function planCompleteTask(input: {
       setDoNotContact: true,
       status: "done",
       outcome: null,
+      closeDuplicateIds,
       next: null,
     };
   }
@@ -265,11 +357,16 @@ export function planCompleteTask(input: {
       setDoNotContact: false,
       status,
       outcome,
+      closeDuplicateIds,
       next: null,
     };
   }
 
-  const otherOpenTaskCount = input.otherOpenTaskCount ?? 0;
+  const otherOpenTaskCount = remainingOpenFollowUpCount({
+    otherOpenTaskCount: input.otherOpenTaskCount,
+    otherOpenTasks: input.otherOpenTasks,
+    closeDuplicateIds,
+  });
   if (otherOpenTaskCount > 0 || !input.next) {
     return {
       ok: true,
@@ -277,6 +374,7 @@ export function planCompleteTask(input: {
       setDoNotContact: false,
       status,
       outcome,
+      closeDuplicateIds,
       next: null,
     };
   }
@@ -292,6 +390,7 @@ export function planCompleteTask(input: {
     setDoNotContact: input.next.kind === "dnc",
     status,
     outcome,
+    closeDuplicateIds,
     next: {
       kind: input.next.kind,
       dueAt: input.next.dueAt,

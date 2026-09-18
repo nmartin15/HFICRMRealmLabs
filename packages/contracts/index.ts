@@ -14,6 +14,7 @@ export * from "./health";
 export * from "./tiers";
 export * from "./hosted-domain";
 export * from "./mailboxes";
+export * from "./gmail-sync";
 export * from "./visibility";
 export * from "./auth";
 export * from "./time";

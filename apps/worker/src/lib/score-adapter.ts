@@ -2,6 +2,7 @@ import {
   canonicalEmail,
   emailMessageDirection,
   foldExtractedSignals,
+  applicationCompletedFromCrm,
   classifyLeadTempWriteSource,
   emptyHandMarkSourceCounts,
   handMarkLineStanding,
@@ -43,6 +44,7 @@ import {
 } from "@realm-labs/contracts";
 import {
   activities,
+  allocationCards,
   emailMessages,
   emailSuppressions,
   emailThreads,
@@ -370,12 +372,26 @@ export async function loadScoreFacts(
   asOf: number,
   previousBucket: LeadTemp | null,
 ): Promise<{ facts: ScoreFacts; signalIds: string[] }> {
-  const [incubator, meetingRows, meetingTaskRows, callRows, signalRows, altMap] =
+  const [
+    incubator,
+    pipeline,
+    meetingRows,
+    meetingTaskRows,
+    callRows,
+    signalRows,
+    altMap,
+  ] =
     await Promise.all([
       db
         .select()
         .from(incubatorCards)
         .where(eq(incubatorCards.personId, person.id))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
+      db
+        .select()
+        .from(allocationCards)
+        .where(eq(allocationCards.personId, person.id))
         .limit(1)
         .then((rows) => rows[0] ?? null),
       db
@@ -513,14 +529,17 @@ export async function loadScoreFacts(
     });
   }
 
-  const stage = incubator?.stage ?? null;
   const facts: ScoreFacts = {
     budgetQualified: person.budgetQualified,
     programTrack: person.programTrack,
     programInterest: person.programInterest,
     incubatorTier: incubator?.tier ?? null,
     priceUsd: incubator?.priceUsd ?? null,
-    applicationCompleted: stage === "applied" || stage === "approved",
+    applicationCompleted: applicationCompletedFromCrm({
+      programTrack: person.programTrack,
+      incubatorStage: incubator?.stage ?? null,
+      pipelineStage: pipeline?.stage ?? null,
+    }),
     conversations,
     inboundReplies,
     programFit,
@@ -1008,6 +1027,7 @@ export type ScoreInspectRaw = {
     sentAt: string;
   }[];
   incubatorStage: string | null;
+  pipelineStage: string | null;
 };
 
 export type ScoreInspectRosterRow = {
@@ -1056,7 +1076,7 @@ async function loadScoreRaw(
   person: typeof people.$inferSelect,
   personEmails: readonly string[],
 ): Promise<Omit<ScoreInspectRaw, "inboundLoaded" | "meetingsHeld">> {
-  const [meetingRows, meetingTaskRows, callRows, messageRows, incubator] =
+  const [meetingRows, meetingTaskRows, callRows, messageRows, incubator, pipeline] =
     await Promise.all([
       db
         .select({
@@ -1094,6 +1114,11 @@ async function loadScoreRaw(
         .from(incubatorCards)
         .where(eq(incubatorCards.personId, person.id))
         .limit(1),
+      db
+        .select({ stage: allocationCards.stage })
+        .from(allocationCards)
+        .where(eq(allocationCards.personId, person.id))
+        .limit(1),
     ]);
   const mailboxAddresses = mailboxEmails();
   const inspectMeetings = [
@@ -1130,6 +1155,7 @@ async function loadScoreRaw(
       sentAt: row.sentAt.toISOString(),
     })),
     incubatorStage: incubator[0]?.stage ?? null,
+    pipelineStage: pipeline[0]?.stage ?? null,
   };
 }
 
@@ -1213,7 +1239,8 @@ export async function inspectWarmestPerson(
     focusRow.raw.meetingsTotal > 0 ||
     focusRow.raw.callTasksTotal > 0 ||
     focusRow.raw.messagesTotal > 0 ||
-    focusRow.raw.incubatorStage !== null;
+    focusRow.raw.incubatorStage !== null ||
+    focusRow.raw.pipelineStage !== null;
 
   return {
     roster,

@@ -4,11 +4,12 @@ import {
   meetingIdParamsSchema,
   meetingOutcomePatchSchema,
   meetingSchema,
+  sameDayOpenMeetingDuplicates,
   yesterdayBoundsUtc,
   type Meeting,
 } from "@realm-labs/contracts";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
-import { and, asc, eq, gte, isNull, lt, or } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, ne, or } from "drizzle-orm";
 import { meetings, people, tasks, type Database } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
 import { enqueuePersonScore } from "../lib/score-enqueue.js";
@@ -156,6 +157,14 @@ export const meetingRoutes: FastifyPluginAsyncZod = async (app) => {
           },
           outcome: req.body.outcome,
         });
+        await closeSameDayOpenMeetings(app.db, {
+          personId: meetingRow.personId,
+          currentId: meetingRow.id,
+          dueAt: meetingRow.scheduledAt,
+          calendarEventId: meetingRow.calendarEventId,
+          outcome: req.body.outcome,
+          actor,
+        });
         return meetingSchema.parse(serializeMeeting(updated));
       }
 
@@ -196,6 +205,14 @@ export const meetingRoutes: FastifyPluginAsyncZod = async (app) => {
           needsReview: taskRow.needsReview,
         },
         outcome: req.body.outcome,
+      });
+      await closeSameDayOpenMeetings(app.db, {
+        personId: taskRow.personId,
+        currentId: taskRow.id,
+        dueAt: taskRow.dueAt,
+        calendarEventId: taskRow.calendarEventId,
+        outcome: req.body.outcome,
+        actor,
       });
       return meetingSchema.parse(serializeMeetingFromTask(updatedTask));
     },
@@ -239,4 +256,74 @@ async function recordMeetingOutcome(
       computedBy: input.actor.id,
     });
   }
+}
+
+async function closeSameDayOpenMeetings(
+  db: Database,
+  input: {
+    personId: string;
+    currentId: string;
+    dueAt: Date;
+    calendarEventId: string | null;
+    outcome: "held" | "no_show" | "rescheduled";
+    actor: { id: string; email: string };
+  },
+): Promise<void> {
+  const siblings = await db
+    .select({
+      id: tasks.id,
+      kind: tasks.kind,
+      dueAt: tasks.dueAt,
+      calendarEventId: tasks.calendarEventId,
+    })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.personId, input.personId),
+        eq(tasks.kind, "meeting"),
+        eq(tasks.status, "open"),
+        ne(tasks.id, input.currentId),
+      ),
+    );
+  const closeIds = sameDayOpenMeetingDuplicates({
+    currentId: input.currentId,
+    currentKind: "meeting",
+    currentDueAt: input.dueAt.toISOString(),
+    currentCalendarEventId: input.calendarEventId,
+    siblings: siblings.map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      dueAt: row.dueAt.toISOString(),
+      calendarEventId: row.calendarEventId,
+    })),
+  });
+  if (closeIds.length === 0) {
+    return;
+  }
+  const status = input.outcome === "rescheduled" ? "rescheduled" : "done";
+  await db
+    .update(tasks)
+    .set({
+      outcome: input.outcome,
+      needsReview: false,
+      status,
+    })
+    .where(and(eq(tasks.personId, input.personId), inArray(tasks.id, closeIds)));
+  await writeActivity(db, {
+    personId: input.personId,
+    userId: input.actor.id,
+    type: "note",
+    payload: {
+      who: { id: input.actor.id, email: input.actor.email },
+      what: "task.complete",
+      when: new Date().toISOString(),
+      before: { duplicateTaskIds: closeIds },
+      after: {
+        taskIds: closeIds,
+        status,
+        outcome: input.outcome,
+        reason: "same_day_meeting",
+      },
+    },
+  });
 }

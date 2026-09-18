@@ -1,10 +1,12 @@
+import { GMAIL_QUOTA_PAUSED_MESSAGE } from "@realm-labs/contracts";
+
 export const GMAIL_MIN_INTERVAL_MS = 250;
 export const GMAIL_QUOTA_RETRY_MS = 60_000;
 export const GMAIL_MAX_QUOTA_WAITS = 3;
 
 export class GmailQuotaPausedError extends Error {
   constructor() {
-    super("Gmail quota paused; next sync will continue");
+    super(GMAIL_QUOTA_PAUSED_MESSAGE);
     this.name = "GmailQuotaPausedError";
   }
 }
@@ -20,40 +22,83 @@ export function createGmailQuotaBudget(
   return { waits: 0, maxWaits };
 }
 
-function errorMessage(err: unknown): string {
-  if (!err || typeof err !== "object") {
-    return "";
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
   }
-  return "message" in err && typeof err.message === "string" ? err.message : "";
+  return value as Record<string, unknown>;
+}
+
+function gaxiosErrorPayload(err: unknown): Record<string, unknown> | null {
+  const root = asRecord(err);
+  if (!root) {
+    return null;
+  }
+  const response = asRecord(root.response);
+  const data = response ? asRecord(response.data) : null;
+  const nested = data ? asRecord(data.error) : null;
+  return nested ?? data;
+}
+
+function errorMessage(err: unknown): string {
+  const root = asRecord(err);
+  if (root && typeof root.message === "string" && root.message.trim()) {
+    const top = root.message.trim();
+    if (!/^request failed with status code \d+/i.test(top)) {
+      return top;
+    }
+  }
+  const payload = gaxiosErrorPayload(err);
+  if (payload && typeof payload.message === "string" && payload.message.trim()) {
+    return payload.message.trim();
+  }
+  if (root && typeof root.message === "string") {
+    return root.message;
+  }
+  return "";
 }
 
 function errorStatus(err: unknown): number {
-  if (!err || typeof err !== "object") {
+  const root = asRecord(err);
+  if (!root) {
     return Number.NaN;
   }
-  if ("status" in err) {
-    return Number(err.status);
+  for (const candidate of [root.status, root.code]) {
+    const status = Number(candidate);
+    if (Number.isFinite(status) && status > 0) {
+      return status;
+    }
   }
-  if ("code" in err) {
-    return Number(err.code);
+  const response = asRecord(root.response);
+  if (response) {
+    const status = Number(response.status);
+    if (Number.isFinite(status) && status > 0) {
+      return status;
+    }
+  }
+  const payload = gaxiosErrorPayload(err);
+  if (payload) {
+    const status = Number(payload.code);
+    if (Number.isFinite(status) && status > 0) {
+      return status;
+    }
   }
   return Number.NaN;
 }
 
-function errorReasons(err: unknown): string[] {
-  if (!err || typeof err !== "object" || !("errors" in err)) {
+function collectReasons(value: unknown): string[] {
+  const record = asRecord(value);
+  if (!record || !("errors" in record) || !Array.isArray(record.errors)) {
     return [];
   }
-  const { errors } = err;
-  if (!Array.isArray(errors)) {
-    return [];
-  }
-  return errors.flatMap((item) => {
-    if (!item || typeof item !== "object" || !("reason" in item)) {
-      return [];
-    }
-    return typeof item.reason === "string" ? [item.reason] : [];
+  return record.errors.flatMap((item) => {
+    const row = asRecord(item);
+    return row && typeof row.reason === "string" ? [row.reason] : [];
   });
+}
+
+function errorReasons(err: unknown): string[] {
+  return [...collectReasons(err), ...collectReasons(gaxiosErrorPayload(err))];
 }
 
 export function isMissingGmailEntity(err: unknown): boolean {

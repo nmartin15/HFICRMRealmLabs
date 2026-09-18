@@ -116,7 +116,7 @@ describe("planWebsiteLead", () => {
     expect(plan).toMatchObject({ ok: false, status: 400, code: "INVALID_NAME" });
   });
 
-  it("plans update and ensures allocation card when missing", () => {
+  it("plans an inquiry update without assigning a program track or board", () => {
     const plan = planWebsiteLead({
       name: "Ada Lovelace",
       message: "Follow up",
@@ -124,7 +124,6 @@ describe("planWebsiteLead", () => {
         id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         doNotContact: false,
         deleted: false,
-        hasAllocationCard: false,
       },
       existingNotes: "Prior",
     });
@@ -133,8 +132,26 @@ describe("planWebsiteLead", () => {
       action: "update",
       personId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       notes: "Prior\n\nFollow up",
-      ensureAllocationCard: true,
-      setProgramTrackAllocation: true,
+      restoreDeleted: false,
+    });
+  });
+
+  it("restores a deleted person on update without assigning a program", () => {
+    const plan = planWebsiteLead({
+      name: "Ada Lovelace",
+      existing: {
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        doNotContact: false,
+        deleted: true,
+      },
+      existingNotes: null,
+    });
+    expect(plan).toEqual({
+      ok: true,
+      action: "update",
+      personId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      notes: null,
+      restoreDeleted: true,
     });
   });
 
@@ -156,7 +173,6 @@ describe("planWebsiteLead", () => {
           id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           doNotContact: true,
           deleted: false,
-          hasAllocationCard: false,
         },
         existingNotes: null,
       }),

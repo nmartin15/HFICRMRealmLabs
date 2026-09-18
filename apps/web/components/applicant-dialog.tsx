@@ -158,9 +158,10 @@ export function ApplicantDialog({
           void submit();
         }}
       >
-        <h2 className="text-sm font-medium">New contact</h2>
+        <h2 className="text-sm font-medium">New applicant</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Program track puts the card on a board. First follow-up is required.
+          Only add people who applied. Program track is the program they
+          applied to. First follow-up is required.
         </p>
 
         <div className="mt-3 grid gap-3">
@@ -185,7 +186,7 @@ export function ApplicantDialog({
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="applicant-track">Program track</Label>
+            <Label htmlFor="applicant-track">Program they applied to</Label>
             <select
               id="applicant-track"
               required

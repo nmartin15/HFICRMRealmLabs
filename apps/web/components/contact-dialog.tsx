@@ -160,7 +160,8 @@ export function ContactDialog({
       >
         <h2 className="text-sm font-medium">Add contact</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Program track can wait. Resume and a follow-up are optional.
+          No program track until they apply. Resume and a follow-up are
+          optional.
         </p>
 
         <div className="mt-3 grid gap-3">

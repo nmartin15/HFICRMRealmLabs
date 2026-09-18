@@ -30,7 +30,12 @@ config({ path: resolve(root, ".env"), override: true });
 
 const env = loadEnv();
 const { db, client } = createDb(env.DATABASE_URL);
-await ensureEmailHashKeyFingerprint(db, env.EMAIL_HASH_KEY);
+try {
+  await ensureEmailHashKeyFingerprint(db, env.EMAIL_HASH_KEY);
+} catch (error) {
+  await client.end({ timeout: 2 }).catch(() => undefined);
+  throw error;
+}
 
 const connection = new IORedis(env.REDIS_URL, {
   maxRetriesPerRequest: null,

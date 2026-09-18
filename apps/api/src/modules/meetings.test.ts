@@ -65,14 +65,18 @@ function digestDb() {
   };
 }
 
+function thenableWhere(rows: unknown[]) {
+  return Object.assign(Promise.resolve(rows), {
+    limit: async () => rows,
+  });
+}
+
 function patchTaskDb() {
   return {
     select: () => ({
       from: (table: typeof meetings | typeof tasks) => ({
-        where: () => ({
-          limit: async () =>
-            getTableName(table) === "tasks" ? [taskRow] : [],
-        }),
+        where: () =>
+          thenableWhere(getTableName(table) === "tasks" ? [taskRow] : []),
       }),
     }),
     update: (table: typeof meetings | typeof tasks) => ({

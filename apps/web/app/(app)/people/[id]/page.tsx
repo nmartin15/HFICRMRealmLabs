@@ -32,6 +32,7 @@ import {
   completedTaskIdFromPayload,
   displayScoreBucket,
   explainDisplayVsCampaign,
+  hasExistingOpenFollowUp,
 } from "@realm-labs/contracts";
 import { api, ApiError } from "@/lib/api";
 import { activityActorLabel, activitySummary } from "@/lib/activity-summary";
@@ -277,96 +278,16 @@ export default function PersonRecordPage() {
   async function completeTask(taskId: string, body: CompleteTaskBody) {
     setError("");
     try {
-      // #region agent log
-      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "126ed8",
-        },
-        body: JSON.stringify({
-          sessionId: "126ed8",
-          runId: "post-fix",
-          hypothesisId: "B",
-          location: "apps/web/app/(app)/people/[id]/page.tsx:completeTask",
-          message: "complete task submitted",
-          data: {
-            hasNext: Boolean(body.next),
-            nextKind: body.next?.kind ?? null,
-            hasOutcome: Boolean(body.outcome),
-            openBefore: detail?.tasks.filter((task) => task.status === "open")
-              .length ?? 0,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       await api<Task>(`/people/${id}/tasks/${taskId}/complete`, {
         method: "POST",
         body: JSON.stringify(body),
       });
       setCompletingId(null);
-      const nextDetail = await load();
-      const stillOpen = nextDetail.tasks.filter(
-        (task) => task.status === "open",
-      );
-      const completedStillOpen = stillOpen.some((task) => task.id === taskId);
-      // #region agent log
-      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "126ed8",
-        },
-        body: JSON.stringify({
-          sessionId: "126ed8",
-          runId: "post-fix",
-          hypothesisId: "B",
-          location: "apps/web/app/(app)/people/[id]/page.tsx:completeTask-after",
-          message: "contact tasks after complete",
-          data: {
-            completedStillOpen,
-            openAfter: stillOpen.length,
-            closedAfter: nextDetail.tasks.filter((task) => task.status !== "open")
-              .length,
-            timelineCount: nextDetail.timeline.length,
-            hasTaskComplete: nextDetail.timeline.some(
-              (item) =>
-                item.kind === "activity" &&
-                item.activity.payload.what === "task.complete",
-            ),
-            newestWhat:
-              nextDetail.timeline.find((item) => item.kind === "activity")
-                ?.activity.payload.what ?? null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+      await load();
       setExpandedTaskId(null);
       setSaveHint("Task closed");
       window.setTimeout(() => setSaveHint(""), 1500);
     } catch (err) {
-      // #region agent log
-      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "126ed8",
-        },
-        body: JSON.stringify({
-          sessionId: "126ed8",
-          runId: "pre-fix",
-          hypothesisId: "C",
-          location: "apps/web/app/(app)/people/[id]/page.tsx:completeTask-error",
-          message: "complete task failed",
-          data: {
-            error: err instanceof Error ? err.message : "unknown",
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setError(err instanceof Error ? err.message : "Failed to complete task");
     }
   }
@@ -665,7 +586,7 @@ export default function PersonRecordPage() {
 
       <section className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
         <div className="space-y-1">
-          <Label htmlFor="programTrack">Program track</Label>
+          <Label htmlFor="programTrack">Program they applied to</Label>
           <select
             id="programTrack"
             className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
@@ -673,19 +594,22 @@ export default function PersonRecordPage() {
             disabled={person.doNotContact}
             onChange={(event) => {
               const value = event.target.value;
-              if (!value) {
-                return;
-              }
-              void patch({ programTrack: value as ProgramTrack });
+              void patch({
+                programTrack: value ? (value as ProgramTrack) : null,
+              });
             }}
           >
-            {!person.programTrack ? <option value="">Select…</option> : null}
+            <option value="">Not applied</option>
             {TRACKS.map((track) => (
               <option key={track} value={track}>
                 {PROGRAM_TRACK_LABELS[track]}
               </option>
             ))}
           </select>
+          <p className="text-xs text-muted-foreground">
+            Only select a program after they applied. Leave blank for inquiries
+            and contacts.
+          </p>
         </div>
         <div className="space-y-1">
           <Label htmlFor="leadTemp">
@@ -831,7 +755,7 @@ export default function PersonRecordPage() {
           Type, due date, and notes stay editable after save. Each change
           is recorded on the timeline.
           I finished this closes the task and logs it on the timeline.
-          Add a new task if you still need a follow-up.
+          If a follow-up is already open, closing this leaves it.
           {saveHint ? ` · ${saveHint}` : ""}
         </p>
         {openTasks.length === 0 ? (
@@ -847,7 +771,6 @@ export default function PersonRecordPage() {
                 payloads: activityPayloads,
               });
               const copy = taskGuideCopy(guide, TASK_KIND_LABELS[task.kind], task);
-              const otherOpen = openTasks.filter((row) => row.id !== task.id).length;
               const owner = taskOwnerLabel(users, task.createdBy);
               return (
               <li key={task.id} className="space-y-2 px-3 py-2 text-sm">
@@ -907,34 +830,6 @@ export default function PersonRecordPage() {
                       variant="outline"
                       onClick={() => {
                         setRemovingId(null);
-                        // #region agent log
-                        fetch(
-                          "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
-                          {
-                            method: "POST",
-                            headers: {
-                              "Content-Type": "application/json",
-                              "X-Debug-Session-Id": "126ed8",
-                            },
-                            body: JSON.stringify({
-                              sessionId: "126ed8",
-                              runId: "post-fix",
-                              hypothesisId: "A",
-                              location:
-                                "apps/web/app/(app)/people/[id]/page.tsx:finished-click",
-                              message: "I finished this clicked",
-                              data: {
-                                otherOpen,
-                                kind: task.kind,
-                                status: task.status,
-                                immediate:
-                                  task.kind !== "meeting" && task.kind !== "dnc",
-                              },
-                              timestamp: Date.now(),
-                            }),
-                          },
-                        ).catch(() => {});
-                        // #endregion
                         if (task.kind === "meeting" || task.kind === "dnc") {
                           openTask(task);
                           setCompletingId(task.id);
@@ -994,6 +889,23 @@ export default function PersonRecordPage() {
                   <CompleteTaskForm
                     task={task}
                     requireFollowUp={false}
+                    hasExistingFollowUp={hasExistingOpenFollowUp({
+                      currentId: task.id,
+                      currentKind: task.kind,
+                      currentDueAt: task.dueAt,
+                      currentCalendarEventId: task.calendarEventId,
+                      otherOpenTasks: detail.tasks
+                        .filter(
+                          (other) =>
+                            other.status === "open" && other.id !== task.id,
+                        )
+                        .map((other) => ({
+                          id: other.id,
+                          kind: other.kind,
+                          dueAt: other.dueAt,
+                          calendarEventId: other.calendarEventId,
+                        })),
+                    })}
                     guide={guide === "overdue" || guide === "follow-up" ? guide : "todo"}
                     onCancel={() => setCompletingId(null)}
                     onSubmit={(body) => void completeTask(task.id, body)}

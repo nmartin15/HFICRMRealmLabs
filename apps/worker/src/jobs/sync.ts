@@ -7,13 +7,21 @@ import {
   emailSnippet,
   extractGmailPlainText,
   gmailContactSearchQueries,
+  gmailHistoryChangedThreadIds,
+  gmailHistoryIdToPersist,
+  GMAIL_METADATA_HEADERS,
   gmailSyncJobDataSchema,
+  gmailSyncPlan,
+  gmailSyncShouldPersistHistoryId,
+  gmailThreadIdsToSkip,
   emailMessageDirection,
   isInboundReply,
   isConfiguredMailbox,
   mailboxEmails,
   matchPersonFromParticipants,
   parseEmailAddresses,
+  planCalendarMeetingTask,
+  shouldProcessGmailThreadId,
   uniqueEmails,
   zonedLocalToUtc,
   type Mailbox,
@@ -32,7 +40,7 @@ import {
   users,
   type Database,
 } from "@realm-labs/db";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { google, type calendar_v3, type gmail_v1 } from "googleapis";
 import type { Env } from "../env.js";
 import { writeActivity } from "../lib/activity.js";
@@ -67,17 +75,7 @@ function headerValue(
 }
 
 function isStaleHistory(err: unknown): boolean {
-  if (!err || typeof err !== "object") {
-    return false;
-  }
-  const code = "code" in err ? Number(err.code) : Number.NaN;
-  const message =
-    "message" in err && typeof err.message === "string" ? err.message : "";
-  return (
-    code === 404 ||
-    message.toLowerCase().includes("historyid") ||
-    message.toLowerCase().includes("not found")
-  );
+  return isMissingGmailEntity(err);
 }
 
 async function loadPeople(db: Database): Promise<PersonEmail[]> {
@@ -113,10 +111,14 @@ async function markSyncError(
   db: Database,
   mailbox: Mailbox,
   message: string,
+  historyId?: string | null,
 ): Promise<void> {
   await db
     .update(mailboxConnections)
-    .set({ lastError: message })
+    .set({
+      lastError: message,
+      ...(historyId !== undefined ? { gmailHistoryId: historyId } : {}),
+    })
     .where(eq(mailboxConnections.mailbox, mailbox));
 }
 
@@ -135,26 +137,12 @@ async function markSyncOk(
     .where(eq(mailboxConnections.mailbox, mailbox));
 }
 
-async function deleteUnmatchedEmailThreads(db: Database): Promise<void> {
-  const unmatched = await db
-    .select({ id: emailThreads.id })
-    .from(emailThreads)
-    .where(isNull(emailThreads.personId));
-  const ids = unmatched.map((row) => row.id);
-  const chunkSize = 500;
-  for (let i = 0; i < ids.length; i += chunkSize) {
-    const chunk = ids.slice(i, i + chunkSize);
-    await db.delete(emailMessages).where(inArray(emailMessages.threadId, chunk));
-  }
-  if (ids.length > 0) {
-    await db.delete(emailThreads).where(isNull(emailThreads.personId));
-  }
-}
-
-async function storedGmailThreadIds(
+async function storedGmailThreads(
   db: Database,
   mailbox: Mailbox,
-): Promise<Set<string>> {
+): Promise<
+  { gmailThreadId: string; personId: string | null; hasMessage: boolean }[]
+> {
   const rows = await db
     .select({
       gmailThreadId: emailThreads.gmailThreadId,
@@ -174,13 +162,11 @@ async function storedGmailThreadIds(
     }
   }
 
-  const skip = new Set<string>();
-  for (const [gmailThreadId, personId] of personByThread) {
-    if (hasMessage.has(gmailThreadId) || !personId) {
-      skip.add(gmailThreadId);
-    }
-  }
-  return skip;
+  return [...personByThread.entries()].map(([gmailThreadId, personId]) => ({
+    gmailThreadId,
+    personId,
+    hasMessage: hasMessage.has(gmailThreadId),
+  }));
 }
 
 async function listChangedThreadIds(
@@ -206,13 +192,8 @@ async function listChangedThreadIds(
       budget,
     );
     historyId = data.historyId ?? historyId;
-    for (const item of data.history ?? []) {
-      for (const added of item.messagesAdded ?? []) {
-        const threadId = added.message?.threadId;
-        if (threadId) {
-          threadIds.add(threadId);
-        }
-      }
+    for (const threadId of gmailHistoryChangedThreadIds(data.history)) {
+      threadIds.add(threadId);
     }
     pageToken = data.nextPageToken ?? undefined;
   } while (pageToken);
@@ -496,6 +477,9 @@ async function getGmailThread(
           userId: "me",
           id: threadId,
           format,
+          ...(format === "metadata"
+            ? { metadataHeaders: [...GMAIL_METADATA_HEADERS] }
+            : {}),
         });
         return data;
       },
@@ -590,13 +574,9 @@ async function processGmailThread(
     input.people,
     input.mailboxAddresses,
   );
-  if (!matched) {
-    return;
-  }
-  const person = input.people.find((row) => row.id === matched.id);
-  if (!person) {
-    return;
-  }
+  const person = matched
+    ? input.people.find((row) => row.id === matched.id) ?? null
+    : null;
 
   const full = await getGmailThread(
     gmail,
@@ -621,7 +601,7 @@ async function processGmailThread(
     lastMessageAt,
     snippet,
     participantEmails,
-    personId: matched.id,
+    personId: person?.id ?? null,
     latestFrom,
     latestToEmails,
     latestCcEmails,
@@ -632,6 +612,9 @@ async function processGmailThread(
     mailboxAddresses: input.mailboxAddresses,
   });
   await upsertGmailMessages(db, thread.id, bodies);
+  if (!person || !matched) {
+    return;
+  }
   const storedMessages = await db
     .select()
     .from(emailMessages)
@@ -721,6 +704,9 @@ export async function runGmailSync(
     return;
   }
 
+  let checkpoint: string | null = null;
+  let historyProcessingComplete = !connection.gmailHistoryId;
+
   try {
     const refreshToken = decryptSecret(
       connection.refreshTokenEncrypted,
@@ -732,29 +718,54 @@ export async function runGmailSync(
     const personRows = await loadPeople(db);
     const addresses = mailboxEmails();
     const budget = createGmailQuotaBudget();
-    await deleteUnmatchedEmailThreads(db);
 
-    let threadIds: string[] = [];
-    let usedFullList = !connection.gmailHistoryId;
+    const profileAtStart = await callGmail(
+      async () => {
+        const response = await gmail.users.getProfile({ userId: "me" });
+        return response.data;
+      },
+      budget,
+    );
+    checkpoint = gmailHistoryIdToPersist({
+      capturedAtStart: profileAtStart.historyId ?? null,
+    });
 
-    if (connection.gmailHistoryId) {
+    let historyStale = false;
+    let historyThreadIds: string[] = [];
+
+    const initialPlan = gmailSyncPlan({
+      storedHistoryId: connection.gmailHistoryId,
+      lastError: connection.lastError,
+      historyStale: false,
+    });
+
+    if (initialPlan.readHistory && connection.gmailHistoryId) {
       try {
         const changed = await listChangedThreadIds(
           gmail,
           connection.gmailHistoryId,
           budget,
         );
-        threadIds = changed.threadIds;
+        historyThreadIds = changed.threadIds;
+        historyProcessingComplete = historyThreadIds.length === 0;
       } catch (err) {
         if (!isStaleHistory(err)) {
           throw err;
         }
-        usedFullList = true;
+        historyStale = true;
+        historyProcessingComplete = true;
       }
     }
 
-    if (usedFullList) {
-      threadIds = await listContactThreadIds(
+    const plan = gmailSyncPlan({
+      storedHistoryId: connection.gmailHistoryId,
+      lastError: connection.lastError,
+      historyStale,
+    });
+
+    let backfillIds: string[] = [];
+    if (plan.contactBackfill) {
+      backfillIds = await listContactThreadIds(
         gmail,
         uniqueEmails(personRows.flatMap((person) => person.emails)),
         addresses,
@@ -762,12 +773,23 @@ export async function runGmailSync(
       );
     }
 
-    const skipThreadIds = usedFullList
-      ? await storedGmailThreadIds(db, mailbox)
-      : new Set<string>();
+    const threadIds = [...new Set([...historyThreadIds, ...backfillIds])];
+    const historyThreadIdSet = new Set(historyThreadIds);
+    const skipThreadIds = gmailThreadIdsToSkip({
+      skipStoredThreads: plan.skipStoredThreads,
+      stored: plan.skipStoredThreads
+        ? await storedGmailThreads(db, mailbox)
+        : [],
+    });
 
     for (const threadId of threadIds) {
-      if (skipThreadIds.has(threadId)) {
+      if (
+        !shouldProcessGmailThreadId({
+          threadId,
+          historyThreadIds: historyThreadIdSet,
+          skipThreadIds,
+        })
+      ) {
         continue;
       }
       await processGmailThread(gmail, db, {
@@ -781,18 +803,30 @@ export async function runGmailSync(
         enqueueScore: extras?.enqueueScore,
       });
     }
+    historyProcessingComplete = true;
 
-    const profile = await callGmail(
-      async () => {
-        const response = await gmail.users.getProfile({ userId: "me" });
-        return response.data;
-      },
-      budget,
-    );
-    await markSyncOk(db, mailbox, profile.historyId ?? null);
+    await markSyncOk(db, mailbox, checkpoint);
   } catch (err) {
     if (err instanceof GmailQuotaPausedError) {
-      await markSyncError(db, mailbox, err.message);
+      const persist = gmailSyncShouldPersistHistoryId({
+        quotaPaused: true,
+        historyProcessingComplete,
+      });
+      await markSyncError(
+        db,
+        mailbox,
+        err.message,
+        persist ? checkpoint : undefined,
+      );
+      return;
+    }
+    if (isMissingGmailEntity(err)) {
+      await markSyncError(
+        db,
+        mailbox,
+        err instanceof Error ? err.message : "Requested entity was not found.",
+        null,
+      );
       return;
     }
     const message = err instanceof Error ? err.message : "Gmail sync failed";
@@ -947,22 +981,68 @@ async function upsertCalendarMeeting(
     return;
   }
 
+  const openWithoutEvent = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.personId, input.person.id),
+        eq(tasks.kind, "meeting"),
+        eq(tasks.status, "open"),
+        isNull(tasks.calendarEventId),
+      ),
+    );
+  const plan = planCalendarMeetingTask({
+    existingByEventId: existing ? { id: existing.id } : null,
+    openMeetingsWithoutEvent: openWithoutEvent.map((row) => ({
+      id: row.id,
+      dueAt: row.dueAt.toISOString(),
+    })),
+    scheduledAt: input.scheduledAt.toISOString(),
+  });
+
+  if (plan.closeDuplicateIds.length > 0) {
+    const duplicates = openWithoutEvent.filter((row) =>
+      plan.closeDuplicateIds.includes(row.id),
+    );
+    for (const duplicate of duplicates) {
+      await db.delete(tasks).where(eq(tasks.id, duplicate.id));
+      await writeActivity(db, {
+        personId: input.person.id,
+        userId: input.actor.id,
+        type: "note",
+        payload: {
+          who: { id: input.actor.id, email: input.actor.email },
+          what: "task.delete",
+          when: new Date().toISOString(),
+          before: {
+            taskId: duplicate.id,
+            kind: duplicate.kind,
+            notes: duplicate.notes,
+          },
+          after: { reason: "calendar_duplicate" },
+        },
+      });
+    }
+  }
+
   if (input.cancelled) {
     const resolution = cancelledMeetingResolution(input.hasReplacement);
     const outcome = resolution === "rescheduled" ? "rescheduled" : "scheduled";
     const status = resolution === "rescheduled" ? "rescheduled" : "open";
     const needsReview = resolution === "needs_review";
-    if (existing) {
+    if (plan.action === "update") {
       await db
         .update(tasks)
         .set({
           dueAt: input.scheduledAt,
+          calendarEventId,
           outcome,
           status,
           needsReview,
           attendeeAccepted,
         })
-        .where(eq(tasks.id, existing.id));
+        .where(eq(tasks.id, plan.taskId));
       await syncMeetingAttendeeAccepted(db, {
         personId: input.person.id,
         calendarEventId,
@@ -991,15 +1071,16 @@ async function upsertCalendarMeeting(
     return;
   }
 
-  if (existing) {
+  if (plan.action === "update") {
     await db
       .update(tasks)
       .set({
         dueAt: input.scheduledAt,
+        calendarEventId,
         needsReview: false,
         attendeeAccepted,
       })
-      .where(eq(tasks.id, existing.id));
+      .where(eq(tasks.id, plan.taskId));
     await syncMeetingAttendeeAccepted(db, {
       personId: input.person.id,
       calendarEventId,
@@ -1126,6 +1207,9 @@ export async function runCalendarSync(
       .set({ lastError: null, lastSyncedAt: new Date() })
       .where(eq(mailboxConnections.mailbox, mailbox));
   } catch (err) {
+    if (isMissingGmailEntity(err)) {
+      return;
+    }
     const message = err instanceof Error ? err.message : "Calendar sync failed";
     await markSyncError(db, mailbox, message);
     throw err;

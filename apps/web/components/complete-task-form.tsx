@@ -24,27 +24,32 @@ const OUTCOME_LABELS: Record<(typeof HAND_SET_MEETING_OUTCOMES)[number], string>
 
 export function CompleteTaskForm({
   task,
-  requireFollowUp = true,
+  requireFollowUp = false,
+  hasExistingFollowUp = false,
   guide = "todo",
   onCancel,
   onSubmit,
 }: {
   task: Pick<Task, "id" | "kind" | "notes">;
   requireFollowUp?: boolean;
+  hasExistingFollowUp?: boolean;
   guide?: "overdue" | "follow-up" | "todo";
   onCancel: () => void;
   onSubmit: (body: CompleteTaskBody) => void;
 }) {
   const isDnc = task.kind === "dnc";
   const isMeeting = task.kind === "meeting";
-  const needsFollowUp = !isDnc && requireFollowUp;
   const [notes, setNotes] = useState(task.notes ?? "");
   const [outcome, setOutcome] = useState<(typeof HAND_SET_MEETING_OUTCOMES)[number]>(
     "held",
   );
+  const [addFollowUp, setAddFollowUp] = useState(
+    requireFollowUp && !isDnc && !hasExistingFollowUp,
+  );
   const [nextKind, setNextKind] = useState<TaskKind>("email");
   const [nextDue, setNextDue] = useState(defaultTaskDueLocal);
   const [nextNotes, setNextNotes] = useState("");
+  const showFollowUp = !isDnc && !hasExistingFollowUp && addFollowUp;
 
   return (
     <form
@@ -58,7 +63,7 @@ export function CompleteTaskForm({
         if (isMeeting) {
           body.outcome = outcome;
         }
-        if (needsFollowUp) {
+        if (showFollowUp) {
           body.next = {
             kind: nextKind,
             dueAt: fromDatetimeLocalValue(nextDue),
@@ -101,12 +106,18 @@ export function CompleteTaskForm({
         <p className="text-xs text-muted-foreground">
           DNC does not need a follow-up.
         </p>
-      ) : needsFollowUp ? (
+      ) : hasExistingFollowUp ? (
+        <p className="text-xs text-muted-foreground">
+          {isMeeting
+            ? "A follow-up is already open. Logging the outcome closes this call and leaves that follow-up."
+            : "A follow-up is already open. Closing this leaves that follow-up."}
+        </p>
+      ) : showFollowUp ? (
         <>
           <p className="text-xs text-muted-foreground">
             {guide === "overdue"
-              ? "Due date passed. Closing this records that you finished the work. Then set the next follow-up — it stays open until you do that later work."
-              : "Closing this records that you finished the work. Then set the next follow-up — it stays open until you do that later work."}
+              ? "Due date passed. Closing this records that you finished the work. The follow-up stays open until you do that later work."
+              : "Closing this records that you finished the work. The follow-up stays open until you do that later work."}
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1">
@@ -148,21 +159,42 @@ export function CompleteTaskForm({
               />
             </div>
           </div>
+          {requireFollowUp ? null : (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setAddFollowUp(false)}
+            >
+              Skip follow-up
+            </button>
+          )}
         </>
       ) : (
-        <p className="text-xs text-muted-foreground">
-          Closing this records that you finished the work. Add a new task if
-          you still need a follow-up.
-        </p>
+        <>
+          <p className="text-xs text-muted-foreground">
+            {isMeeting
+              ? "Logging the outcome closes this call. Add a follow-up only if you still need one."
+              : "Closing this records that you finished the work. Add a follow-up only if you still need one."}
+          </p>
+          <button
+            type="button"
+            className="justify-self-start text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setAddFollowUp(true)}
+          >
+            Add a follow-up
+          </button>
+        </>
       )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           Cancel
         </Button>
         <Button type="submit" size="sm">
-          {needsFollowUp
+          {showFollowUp
             ? "Close this and set the next follow-up"
-            : "Close this task"}
+            : isMeeting
+              ? "Log outcome and close"
+              : "Close this task"}
         </Button>
       </div>
     </form>

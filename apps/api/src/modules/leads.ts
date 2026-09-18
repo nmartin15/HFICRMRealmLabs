@@ -26,7 +26,6 @@ import {
   isWebsiteLeadHoneypot,
   planWebsiteLead,
   shouldVerifyFormIntakeEmail,
-  todayIsoInDisplayZone,
   websiteLeadBodySchema,
   websiteLeadResponseSchema,
   type WebsiteLeadBody,
@@ -35,7 +34,6 @@ import {
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { eq } from "drizzle-orm";
 import {
-  allocationCards,
   findPersonByEmail,
   people,
   type Database,
@@ -102,15 +100,7 @@ async function personByEmail(db: Database, email: string) {
   if (!person) {
     return null;
   }
-  const cardRows = await db
-    .select({ id: allocationCards.id })
-    .from(allocationCards)
-    .where(eq(allocationCards.personId, person.id))
-    .limit(1);
-  return {
-    person,
-    hasAllocationCard: Boolean(cardRows[0]),
-  };
+  return { person };
 }
 
 export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -182,7 +172,6 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
               id: matched.person.id,
               doNotContact: matched.person.doNotContact,
               deleted: Boolean(matched.person.deletedAt),
-              hasAllocationCard: matched.hasAllocationCard,
             }
           : null,
         existingNotes: matched?.person.notes ?? null,
@@ -222,9 +211,7 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
               lastName: plan.lastName,
               email: body.email,
               source: "website",
-              appliedAt: todayIsoInDisplayZone(when),
               notes: plan.notes,
-              programTrack: "allocation",
               programInterest: body.programInterest,
               emailVerificationResult: kickboxResult,
               emailVerifiedAt: kickboxResult ? when : null,
@@ -233,11 +220,6 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
           if (!created) {
             throw httpError(500, "INTERNAL", "Failed to create person");
           }
-
-          await tx.insert(allocationCards).values({
-            personId: created.id,
-            stage: "applied",
-          });
 
           await writeActivity(typedTx, {
             personId: created.id,
@@ -254,19 +236,6 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
                 source: "website",
                 emailVerificationResult: kickboxResult,
               },
-            },
-          });
-
-          await writeActivity(typedTx, {
-            personId: created.id,
-            userId: null,
-            type: "stage_change",
-            payload: {
-              who,
-              what: "allocation.stage_change",
-              when: when.toISOString(),
-              before: null,
-              after: { stage: "applied", source: "website" },
             },
           });
 
@@ -295,7 +264,6 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
         const before = {
           notes: matched?.person.notes ?? null,
           programInterest: matched?.person.programInterest ?? null,
-          programTrack: matched?.person.programTrack ?? null,
         };
 
         await tx
@@ -303,33 +271,9 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
           .set({
             notes: plan.notes,
             programInterest: body.programInterest,
-            ...(plan.setProgramTrackAllocation
-              ? { programTrack: "allocation" as const }
-              : {}),
-            ...(matched?.person.deletedAt && plan.setProgramTrackAllocation
-              ? { deletedAt: null }
-              : {}),
+            ...(plan.restoreDeleted ? { deletedAt: null } : {}),
           })
           .where(eq(people.id, plan.personId));
-
-        if (plan.ensureAllocationCard) {
-          await tx.insert(allocationCards).values({
-            personId: plan.personId,
-            stage: "applied",
-          });
-          await writeActivity(typedTx, {
-            personId: plan.personId,
-            userId: null,
-            type: "stage_change",
-            payload: {
-              who,
-              what: "allocation.stage_change",
-              when: when.toISOString(),
-              before: null,
-              after: { stage: "applied", source: "website" },
-            },
-          });
-        }
 
         await writeActivity(typedTx, {
           personId: plan.personId,
@@ -343,9 +287,6 @@ export const leadRoutes: FastifyPluginAsyncZod = async (app) => {
             after: {
               notes: plan.notes,
               programInterest: body.programInterest,
-              ...(plan.setProgramTrackAllocation
-                ? { programTrack: "allocation" }
-                : {}),
             },
           },
         });

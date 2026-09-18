@@ -34,7 +34,7 @@ function matchesQuery(person: Person, query: string): boolean {
     person.location,
     person.programTrack
       ? PROGRAM_TRACK_LABELS[person.programTrack]
-      : "Untracked",
+      : "Not applied",
   ]
     .filter((value): value is string => Boolean(value))
     .join(" ")
@@ -44,7 +44,7 @@ function matchesQuery(person: Person, query: string): boolean {
 
 function trackLabel(person: Person): string {
   if (!person.programTrack) {
-    return "Untracked";
+    return "Not applied";
   }
   return PROGRAM_TRACK_LABELS[person.programTrack];
 }
@@ -106,7 +106,8 @@ export default function ContactsPage() {
         <div>
           <h1 className="text-xl font-medium tracking-tight">Contacts</h1>
           <p className="text-sm text-muted-foreground">
-            j/k to move, enter to open, c to add. Program track can wait.
+            j/k to move, enter to open, c to add. Do not set a program track
+            until they applied.
           </p>
         </div>
         <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>

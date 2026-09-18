@@ -190,7 +190,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           .from(tasks)
           .innerJoin(people, eq(tasks.personId, people.id))
           .where(
-            and(eq(tasks.status, "open"), lt(tasks.dueAt, today.end), listed),
+            and(eq(tasks.status, "open"), listed),
           )
           .orderBy(asc(tasks.dueAt)),
         app.db
@@ -269,6 +269,16 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           .map((item) => item.task.id),
       ]);
 
+      const allOpenTasks = openTaskRows
+        .filter((row) => visibleTask(row.task.createdBy))
+        .map((row) => ({
+          id: row.task.id,
+          personId: row.person.id,
+          kind: row.task.kind,
+          dueAt: row.task.dueAt.toISOString(),
+          calendarEventId: row.task.calendarEventId,
+        }));
+
       const todayEmailTasks: HomeScheduleItem[] = [];
       const openTasks: HomeOpenTaskInput[] = [];
       for (const row of openTaskRows) {
@@ -283,6 +293,9 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           skipCallPersonIds.add(row.person.id);
         }
         if (row.task.kind === "meeting" || closeTaskIds.has(row.task.id)) {
+          continue;
+        }
+        if (row.task.dueAt.getTime() >= today.end.getTime()) {
           continue;
         }
         openTasks.push({
@@ -368,6 +381,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         leftoverMeetings,
         todayMeetings,
         openTasks,
+        allOpenTasks,
         unmatchedEmails,
         callsDue,
         decisions,

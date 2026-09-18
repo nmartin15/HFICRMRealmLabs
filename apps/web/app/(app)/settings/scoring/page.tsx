@@ -550,10 +550,10 @@ export default function ScoringSettingsPage() {
                 }
               />
             </Section>
-            <Section title="Application">
+            <Section title="Application (any program)">
               <NumberField
                 id="app-yes"
-                label="Completed"
+                label="Applied"
                 value={draft.application.completed}
                 onChange={(value) =>
                   setDraft({
@@ -564,7 +564,7 @@ export default function ScoringSettingsPage() {
               />
               <NumberField
                 id="app-no"
-                label="Not completed"
+                label="Not applied"
                 value={draft.application.notCompleted}
                 onChange={(value) =>
                   setDraft({

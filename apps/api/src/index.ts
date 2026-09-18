@@ -15,3 +15,4 @@ const envPort = Number.parseInt(process.env.PORT ?? "", 10);
 const port = Number.isFinite(envPort) && envPort > 0 ? envPort : env.API_PORT;
 
 await app.listen({ port, host: "0.0.0.0" });
+console.log(`API listening on ${port}`);

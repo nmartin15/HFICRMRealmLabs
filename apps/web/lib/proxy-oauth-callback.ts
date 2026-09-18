@@ -16,11 +16,22 @@ export async function proxyOAuthCallback(
     headers.set("cookie", cookie);
   }
 
-  const res = await fetch(dest, {
-    method: "GET",
-    headers,
-    redirect: "manual",
-  });
+  let res: Response;
+  try {
+    res = await fetch(dest, {
+      method: "GET",
+      headers,
+      redirect: "manual",
+    });
+  } catch {
+    const login = new URL("/login", incoming.origin);
+    login.searchParams.set("error", "OAUTH_ERROR");
+    login.searchParams.set(
+      "message",
+      "API is not running. Start it, then try Google sign-in again.",
+    );
+    return NextResponse.redirect(login);
+  }
 
   const location = res.headers.get("location");
   const next = location

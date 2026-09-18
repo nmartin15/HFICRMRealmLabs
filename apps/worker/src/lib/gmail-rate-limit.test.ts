@@ -18,6 +18,25 @@ describe("isMissingGmailEntity", () => {
     ).toBe(true);
   });
 
+  it("detects Gaxios-wrapped Gmail 404s used in cloud sync", () => {
+    expect(
+      isMissingGmailEntity({
+        message: "Request failed with status code 404",
+        code: "ERR_BAD_REQUEST",
+        response: {
+          status: 404,
+          data: {
+            error: {
+              code: 404,
+              message: "Requested entity was not found.",
+              errors: [{ reason: "notFound" }],
+            },
+          },
+        },
+      }),
+    ).toBe(true);
+  });
+
   it("ignores quota and auth failures", () => {
     expect(
       isMissingGmailEntity({
@@ -81,5 +100,6 @@ describe("GmailQuotaPausedError", () => {
     const err = new GmailQuotaPausedError();
     expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe("GmailQuotaPausedError");
+    expect(err.message).toBe("Gmail quota paused; next sync will continue");
   });
 });

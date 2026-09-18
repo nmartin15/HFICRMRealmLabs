@@ -138,6 +138,45 @@ describe("home day snapshot", () => {
     expect(counts.emails).toBe(4);
   });
 
+  it("marks leftover call close when a later follow-up is already open", () => {
+    const leftover = meetingTask(
+      "2026-08-24T17:00:00.000Z",
+      "22222222-2222-4222-8222-222222222222",
+    );
+    const todos = buildHomeTodos({
+      leftoverMeetings: [leftover],
+      todayMeetings: [],
+      openTasks: [],
+      allOpenTasks: [
+        {
+          id: leftover.task.id,
+          personId: person.id,
+          kind: "meeting",
+          dueAt: leftover.task.dueAt,
+          calendarEventId: leftover.task.calendarEventId,
+        },
+        {
+          id: "44444444-4444-4444-8444-444444444444",
+          personId: person.id,
+          kind: "email",
+          dueAt: "2026-08-28T16:00:00.000Z",
+          calendarEventId: null,
+        },
+      ],
+      unmatchedEmails: [],
+      callsDue: [],
+      decisions: [],
+      incubatorWaiting: [],
+      needsTrack: [],
+      campaignReview: [],
+      needsReview: [],
+      now: new Date("2026-08-25T18:00:00.000Z"),
+    });
+
+    expect(todos).toHaveLength(1);
+    expect(todos[0]?.hasOpenFollowUp).toBe(true);
+  });
+
   it("treats a CRM email task as an Emails today item", () => {
     const dueAt = "2026-08-25T16:00:00.000Z";
     const parsed = homeEmailItemSchema.parse({

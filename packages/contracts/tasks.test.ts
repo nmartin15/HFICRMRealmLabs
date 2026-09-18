@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyOpenTask,
   describeTaskActivity,
+  hasExistingOpenFollowUp,
   isFollowUpTask,
   planCompleteTask,
   planCreateTask,
@@ -131,6 +132,7 @@ describe("planCompleteTask", () => {
       setDoNotContact: true,
       status: "done",
       outcome: null,
+      closeDuplicateIds: [],
       next: null,
     });
   });
@@ -249,6 +251,138 @@ describe("planCompleteTask", () => {
     ).toMatchObject({
       ok: true,
       status: "done",
+      next: null,
+      closeDuplicateIds: [],
+    });
+  });
+
+  it("ignores a requested follow-up when a later follow-up is already open", () => {
+    expect(
+      planCompleteTask({
+        currentId: "11111111-1111-4111-8111-111111111111",
+        currentKind: "meeting",
+        currentStatus: "open",
+        currentDueAt: "2026-09-18T18:00:00.000Z",
+        currentCalendarEventId: "evt-1",
+        notes: "Good call",
+        outcome: "held",
+        next: {
+          kind: "email",
+          dueAt: "2026-09-20T16:00:00.000Z",
+        },
+        personDoNotContact: false,
+        personDeleted: false,
+        otherOpenTasks: [
+          {
+            id: "44444444-4444-4444-8444-444444444444",
+            kind: "email",
+            dueAt: "2026-09-22T16:00:00.000Z",
+            calendarEventId: null,
+          },
+        ],
+      }),
+    ).toMatchObject({
+      ok: true,
+      status: "done",
+      next: null,
+      closeDuplicateIds: [],
+    });
+  });
+
+  it("treats a later open task as an existing follow-up", () => {
+    expect(
+      hasExistingOpenFollowUp({
+        currentId: "11111111-1111-4111-8111-111111111111",
+        currentKind: "meeting",
+        currentDueAt: "2026-09-18T18:00:00.000Z",
+        currentCalendarEventId: "evt-1",
+        otherOpenTasks: [
+          {
+            id: "44444444-4444-4444-8444-444444444444",
+            kind: "email",
+            dueAt: "2026-09-22T16:00:00.000Z",
+            calendarEventId: null,
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("does not treat a same-day leftover meeting as an existing follow-up", () => {
+    expect(
+      hasExistingOpenFollowUp({
+        currentId: "11111111-1111-4111-8111-111111111111",
+        currentKind: "meeting",
+        currentDueAt: "2026-09-18T18:00:00.000Z",
+        currentCalendarEventId: "evt-1",
+        otherOpenTasks: [
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            kind: "meeting",
+            dueAt: "2026-09-18T19:00:00.000Z",
+            calendarEventId: null,
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("closes a same-day leftover meeting without creating another follow-up", () => {
+    expect(
+      planCompleteTask({
+        currentId: "11111111-1111-4111-8111-111111111111",
+        currentKind: "meeting",
+        currentStatus: "open",
+        currentDueAt: "2026-09-18T18:00:00.000Z",
+        currentCalendarEventId: "evt-1",
+        notes: "Good call",
+        outcome: "held",
+        next: undefined,
+        personDoNotContact: false,
+        personDeleted: false,
+        otherOpenTasks: [
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            kind: "meeting",
+            dueAt: "2026-09-18T19:00:00.000Z",
+            calendarEventId: null,
+          },
+        ],
+      }),
+    ).toMatchObject({
+      ok: true,
+      status: "done",
+      outcome: "held",
+      next: null,
+      closeDuplicateIds: ["22222222-2222-4222-8222-222222222222"],
+    });
+  });
+
+  it("keeps a later meeting open when logging today's call", () => {
+    expect(
+      planCompleteTask({
+        currentId: "11111111-1111-4111-8111-111111111111",
+        currentKind: "meeting",
+        currentStatus: "open",
+        currentDueAt: "2026-09-18T18:00:00.000Z",
+        currentCalendarEventId: "evt-1",
+        notes: "Good call",
+        outcome: "held",
+        next: undefined,
+        personDoNotContact: false,
+        personDeleted: false,
+        otherOpenTasks: [
+          {
+            id: "33333333-3333-4333-8333-333333333333",
+            kind: "meeting",
+            dueAt: "2026-09-25T18:00:00.000Z",
+            calendarEventId: null,
+          },
+        ],
+      }),
+    ).toMatchObject({
+      ok: true,
+      closeDuplicateIds: [],
       next: null,
     });
   });

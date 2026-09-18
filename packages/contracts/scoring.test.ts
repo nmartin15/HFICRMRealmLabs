@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EMPTY_EXTRACTED_SCORE_FACTS } from "./signals";
 import {
+  applicationCompletedFromCrm,
   applyHysteresis,
   campaignScoreView,
   decayFactor,
@@ -452,7 +453,7 @@ describe("scoreContact", () => {
     ).toMatchObject({ contribution: 2, reason: "interest_track_other" });
   });
 
-  it("does not award application points until incubator applied/approved is marked complete", () => {
+  it("does not award application points until applicationCompleted is marked", () => {
     expect(
       component(scoreContact(facts()), "application").contribution,
     ).toBe(0);
@@ -462,6 +463,72 @@ describe("scoreContact", () => {
         "application",
       ).contribution,
     ).toBe(15);
+  });
+
+  it("treats a program track plus applied board stage as applied", () => {
+    expect(
+      applicationCompletedFromCrm({
+        programTrack: null,
+        incubatorStage: null,
+        pipelineStage: null,
+      }),
+    ).toBe(false);
+    expect(
+      applicationCompletedFromCrm({
+        programTrack: null,
+        incubatorStage: null,
+        pipelineStage: "applied",
+      }),
+    ).toBe(false);
+    expect(
+      applicationCompletedFromCrm({
+        programTrack: "incubator",
+        incubatorStage: "sent",
+        pipelineStage: null,
+      }),
+    ).toBe(false);
+    expect(
+      applicationCompletedFromCrm({
+        programTrack: "incubator",
+        incubatorStage: "rejected",
+        pipelineStage: null,
+      }),
+    ).toBe(false);
+    expect(
+      applicationCompletedFromCrm({
+        programTrack: "incubator",
+        incubatorStage: "applied",
+        pipelineStage: null,
+      }),
+    ).toBe(true);
+    expect(
+      applicationCompletedFromCrm({
+        programTrack: "incubator",
+        incubatorStage: "approved",
+        pipelineStage: null,
+      }),
+    ).toBe(true);
+    expect(
+      applicationCompletedFromCrm({
+        programTrack: "allocation",
+        incubatorStage: null,
+        pipelineStage: "applied",
+      }),
+    ).toBe(true);
+    expect(
+      applicationCompletedFromCrm({
+        programTrack: "recruitment",
+        incubatorStage: "sent",
+        pipelineStage: "contacted",
+      }),
+    ).toBe(true);
+    expect(
+      applicationCompletedFromCrm({
+        programTrack: "capital_raising",
+        incubatorStage: null,
+        pipelineStage: "passed",
+      }),
+    ).toBe(true);
   });
 
   it("is deterministic for the same facts and asOf", () => {

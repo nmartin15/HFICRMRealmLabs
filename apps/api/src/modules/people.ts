@@ -25,6 +25,7 @@ import {
   planLeadTempPatch,
   planUpdateTask,
   operatorTempBodySchema,
+  todayIsoInDisplayZone,
   scoreBucketHoldSchema,
   warmthSignalValueSchema,
   taskIdParamsSchema,
@@ -342,6 +343,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         leadTemp?: typeof row.leadTemp;
         budgetQualified?: typeof row.budgetQualified;
         programTrack?: typeof row.programTrack;
+        appliedAt?: string | null;
         doNotContact?: boolean;
         needsReview?: boolean;
         notes?: string | null;
@@ -371,20 +373,15 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         patch.programTrack !== undefined &&
         patch.programTrack !== row.programTrack
       ) {
-        if (
-          patch.programTrack === null &&
-          !row.doNotContact &&
-          (patch.doNotContact !== true)
-        ) {
-          throw httpError(
-            400,
-            "PROGRAM_TRACK_REQUIRED",
-            "Program track is required unless DNC",
-          );
-        }
         before.programTrack = row.programTrack;
         after.programTrack = patch.programTrack;
         update.programTrack = patch.programTrack;
+        if (patch.programTrack !== null && row.appliedAt === null) {
+          const appliedAt = todayIsoInDisplayZone(new Date());
+          before.appliedAt = row.appliedAt;
+          after.appliedAt = appliedAt;
+          update.appliedAt = appliedAt;
+        }
       }
 
       if (patch.leadTemp !== undefined && patch.leadTemp !== row.leadTemp) {
@@ -523,7 +520,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         if (!existingIncub[0]) {
           await app.db.insert(incubatorCards).values({
             personId: updated.id,
-            stage: "sent",
+            stage: "applied",
             routedAt: when,
           });
         }
@@ -932,7 +929,12 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         throw httpError(404, "NOT_FOUND", "Task not found");
       }
       const siblingOpen = await app.db
-        .select({ id: tasks.id })
+        .select({
+          id: tasks.id,
+          kind: tasks.kind,
+          dueAt: tasks.dueAt,
+          calendarEventId: tasks.calendarEventId,
+        })
         .from(tasks)
         .where(
           and(
@@ -941,47 +943,24 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
             ne(tasks.id, current.id),
           ),
         );
-      const otherOpenTaskCount = siblingOpen.length;
       const plan = planCompleteTask({
+        currentId: current.id,
         currentKind: current.kind,
         currentStatus: current.status,
+        currentDueAt: current.dueAt.toISOString(),
+        currentCalendarEventId: current.calendarEventId,
         notes: req.body.notes ?? current.notes,
         outcome: req.body.outcome,
         next: req.body.next,
         personDoNotContact: row.doNotContact,
         personDeleted: Boolean(row.deletedAt),
-        otherOpenTaskCount,
+        otherOpenTasks: siblingOpen.map((task) => ({
+          id: task.id,
+          kind: task.kind,
+          dueAt: task.dueAt.toISOString(),
+          calendarEventId: task.calendarEventId,
+        })),
       });
-      // #region agent log
-      {
-        const payload = {
-          sessionId: "126ed8",
-          runId: "pre-fix",
-          hypothesisId: "C",
-          location: "apps/api/src/modules/people.ts:complete",
-          message: "planCompleteTask result",
-          data: {
-            currentStatus: current.status,
-            currentKind: current.kind,
-            otherOpenTaskCount,
-            hasBodyNext: Boolean(req.body.next),
-            planOk: plan.ok,
-            planStatus: plan.ok ? plan.status : plan.code,
-            willCreateFollowUp: plan.ok ? Boolean(plan.next) : false,
-          },
-          timestamp: Date.now(),
-        };
-        fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "126ed8",
-          },
-          body: JSON.stringify(payload),
-        }).catch(() => {});
-        req.log.info(payload.data, "task-complete-debug");
-      }
-      // #endregion
       if (!plan.ok) {
         throw httpError(plan.status, plan.code, plan.message);
       }
@@ -999,27 +978,39 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!updated) {
         throw httpError(500, "INTERNAL", "Failed to complete task");
       }
-      // #region agent log
-      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "126ed8",
-        },
-        body: JSON.stringify({
-          sessionId: "126ed8",
-          runId: "post-fix",
-          hypothesisId: "B",
-          location: "apps/api/src/modules/people.ts:complete-updated",
-          message: "task row after complete",
-          data: {
-            status: updated.status,
-            createdFollowUp: Boolean(plan.next),
+      if (plan.closeDuplicateIds.length > 0) {
+        await app.db
+          .update(tasks)
+          .set({
+            status: plan.status,
+            outcome: plan.outcome,
+            needsReview: false,
+          })
+          .where(
+            and(
+              eq(tasks.personId, row.id),
+              eq(tasks.status, "open"),
+              inArray(tasks.id, plan.closeDuplicateIds),
+            ),
+          );
+        await writeActivity(app.db, {
+          personId: row.id,
+          userId: actor.id,
+          type: "note",
+          payload: {
+            who: { id: actor.id, email: actor.email },
+            what: "task.complete",
+            when: new Date().toISOString(),
+            before: { duplicateTaskIds: plan.closeDuplicateIds },
+            after: {
+              taskIds: plan.closeDuplicateIds,
+              status: plan.status,
+              outcome: plan.outcome,
+              reason: "same_day_meeting",
+            },
           },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+        });
+      }
 
       const nextStatus = plan.next
         ? plan.next.kind === "dnc"

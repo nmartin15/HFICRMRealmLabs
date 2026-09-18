@@ -8,6 +8,8 @@ import {
   programInterestSchema,
   programTrackSchema,
   uuidSchema,
+  type AllocationStage,
+  type IncubatorStage,
   type LeadTemp,
   type ProgramInterest,
   type ProgramTrack,
@@ -176,6 +178,31 @@ export const scoreFactsSchema = z.object({
   operatorTemp: operatorTempSchema.default(null),
 });
 export type ScoreFacts = z.input<typeof scoreFactsSchema>;
+
+/**
+ * Program track is the program they applied to. No track means not applied.
+ * Incubator Sent is outbound app, not an application yet.
+ */
+export function applicationCompletedFromCrm(input: {
+  programTrack: ProgramTrack | null;
+  incubatorStage: IncubatorStage | null;
+  pipelineStage: AllocationStage | null;
+}): boolean {
+  if (input.programTrack === "incubator") {
+    return (
+      input.incubatorStage === "applied" ||
+      input.incubatorStage === "approved"
+    );
+  }
+  if (
+    input.programTrack === "allocation" ||
+    input.programTrack === "recruitment" ||
+    input.programTrack === "capital_raising"
+  ) {
+    return input.pipelineStage !== null;
+  }
+  return false;
+}
 
 export const SCORE_COMPONENT_IDS = [
   "affordability",

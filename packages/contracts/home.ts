@@ -12,7 +12,12 @@ import {
   uuidSchema,
 } from "./enums";
 import type { IncubatorStage } from "./enums";
-import { TASK_KIND_LABELS, taskSchema } from "./tasks";
+import {
+  TASK_KIND_LABELS,
+  hasExistingOpenFollowUp,
+  taskSchema,
+  type OpenTaskSibling,
+} from "./tasks";
 import {
   meetingDigestPersonSchema,
   type MeetingDigestPerson,
@@ -56,6 +61,7 @@ export const homeTodoSchema = z.object({
   at: isoDateTimeSchema.nullable(),
   taskId: uuidSchema.nullable(),
   personId: uuidSchema.nullable(),
+  hasOpenFollowUp: z.boolean().default(false),
 });
 export type HomeTodo = z.infer<typeof homeTodoSchema>;
 
@@ -149,7 +155,7 @@ export function isIncubatorWaitingStage(
   return stage === "applied";
 }
 
-function todo(partial: HomeTodo): HomeTodo {
+function todo(partial: z.input<typeof homeTodoSchema>): HomeTodo {
   return homeTodoSchema.parse(partial);
 }
 
@@ -171,6 +177,7 @@ export function buildHomeTodos(input: {
   leftoverMeetings: HomeScheduleItem[];
   todayMeetings: HomeScheduleItem[];
   openTasks: HomeOpenTaskInput[];
+  allOpenTasks?: Array<OpenTaskSibling & { personId: string }>;
   unmatchedEmails: Array<{
     id: string;
     subject: string;
@@ -186,6 +193,19 @@ export function buildHomeTodos(input: {
   now: Date;
 }): HomeTodo[] {
   const items: HomeTodo[] = [];
+  const allOpenTasks = input.allOpenTasks ?? [];
+
+  function closeMeetingHasFollowUp(item: HomeScheduleItem): boolean {
+    return hasExistingOpenFollowUp({
+      currentId: item.task.id,
+      currentKind: item.task.kind,
+      currentDueAt: item.task.dueAt,
+      currentCalendarEventId: item.task.calendarEventId,
+      otherOpenTasks: allOpenTasks.filter(
+        (task) => task.personId === item.person.id && task.id !== item.task.id,
+      ),
+    });
+  }
 
   for (const item of input.leftoverMeetings) {
     items.push(
@@ -194,10 +214,11 @@ export function buildHomeTodos(input: {
         kind: "close_meeting",
         href: `/people/${item.person.id}`,
         title: personDisplayName(item.person),
-        detail: "Close leftover call",
+        detail: "Log leftover call outcome",
         at: item.task.dueAt,
         taskId: item.task.id,
         personId: item.person.id,
+        hasOpenFollowUp: closeMeetingHasFollowUp(item),
       }),
     );
   }
@@ -219,10 +240,11 @@ export function buildHomeTodos(input: {
         kind: "close_meeting",
         href: `/people/${item.person.id}`,
         title: personDisplayName(item.person),
-        detail: "Close today's call",
+        detail: "Log today's call outcome",
         at: item.task.dueAt,
         taskId: item.task.id,
         personId: item.person.id,
+        hasOpenFollowUp: closeMeetingHasFollowUp(item),
       }),
     );
   }
