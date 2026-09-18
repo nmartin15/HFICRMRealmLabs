@@ -189,6 +189,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@realm-labs/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       dotenv:
         specifier: ^16.5.0
         version: 16.6.1

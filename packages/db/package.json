@@ -18,6 +18,7 @@
     "seed": "tsx seed.ts"
   },
   "dependencies": {
+    "@realm-labs/contracts": "workspace:*",
     "dotenv": "^16.5.0",
     "drizzle-orm": "^0.44.4",
     "postgres": "^3.4.7"
