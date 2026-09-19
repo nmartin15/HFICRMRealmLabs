@@ -50,28 +50,6 @@ export function ScoreInspectPanel({
   const load = useCallback(async () => {
     const data = await api<PersonInspectResponse>(`/people/${personId}/inspect`);
     setInspect(data);
-    // #region agent log
-    fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "4bef3e",
-      },
-      body: JSON.stringify({
-        sessionId: "4bef3e",
-        runId: "second-contact",
-        hypothesisId: "A",
-        location: "score-inspect-panel.tsx:load",
-        message: "inspect loaded",
-        data: {
-          personId,
-          active: data.operator.active,
-          level: data.operator.level,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     onOperatorChangeRef.current?.(
       data.operator.active ? data.operator.level : null,
     );
