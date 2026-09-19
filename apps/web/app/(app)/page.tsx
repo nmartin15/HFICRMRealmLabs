@@ -258,7 +258,7 @@ export default function HomePage() {
             startIndex={closeOffset}
             selected={selected}
             completingId={completingId}
-            onToggleComplete={setCompletingId}
+            onToggleComplete={(id) => setCompletingId(id)}
             onComplete={completeMeetingTask}
             onCancelComplete={() => setCompletingId(null)}
           />
@@ -275,7 +275,7 @@ export default function HomePage() {
             startIndex={followOffset}
             selected={selected}
             completingId={completingId}
-            onToggleComplete={setCompletingId}
+            onToggleComplete={(id) => setCompletingId(id)}
             onComplete={completeMeetingTask}
             onCancelComplete={() => setCompletingId(null)}
           />
@@ -292,7 +292,7 @@ export default function HomePage() {
             startIndex={decisionOffset}
             selected={selected}
             completingId={completingId}
-            onToggleComplete={setCompletingId}
+            onToggleComplete={(id) => setCompletingId(id)}
             onComplete={completeMeetingTask}
             onCancelComplete={() => setCompletingId(null)}
           />
@@ -328,7 +328,7 @@ export default function HomePage() {
                 navIndex={unmatchedOffset + index}
                 active={selected === unmatchedOffset + index}
                 completingId={completingId}
-                onToggleComplete={setCompletingId}
+                onToggleComplete={(id) => setCompletingId(id)}
                 onComplete={completeMeetingTask}
                 onCancelComplete={() => setCompletingId(null)}
               />

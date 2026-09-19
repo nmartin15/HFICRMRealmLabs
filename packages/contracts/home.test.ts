@@ -165,6 +165,32 @@ describe("home day snapshot", () => {
     ]);
   });
 
+  it("assigns every home todo kind to exactly one section", () => {
+    expect(
+      [
+        "close_meeting",
+        "campaign_review",
+        "needs_track",
+        "needs_review",
+        "task",
+        "email",
+        "call",
+        "decision",
+        "incubator",
+      ].map(homeTodoGroup),
+    ).toEqual([
+      "close_calls",
+      "decisions",
+      "decisions",
+      "decisions",
+      "follow_ups",
+      "mail",
+      "decisions",
+      "decisions",
+      "decisions",
+    ]);
+  });
+
   it("marks leftover call close when a later follow-up is already open", () => {
     const leftover = meetingTask(
       "2026-08-24T17:00:00.000Z",
