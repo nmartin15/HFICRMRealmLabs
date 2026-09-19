@@ -147,32 +147,6 @@ export default function PersonRecordPage() {
   const [inspectReload, setInspectReload] = useState(0);
   const recruiters = useRecruiters(true);
 
-  useEffect(() => {
-    // #region agent log
-    const select = document.getElementById("leadTemp") as HTMLSelectElement | null;
-    fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "4bef3e",
-      },
-      body: JSON.stringify({
-        sessionId: "4bef3e",
-        runId: "second-contact",
-        hypothesisId: "A",
-        location: "people/[id]/page.tsx:operatorLevel-effect",
-        message: "operatorLevel state",
-        data: {
-          operatorLevel,
-          selectValue: select?.value ?? null,
-          inspectReload,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [inspectReload, operatorLevel]);
-
   const load = useCallback(async () => {
     const [personRes, userRes] = await Promise.all([
       api<PersonDetailResponse>(`/people/${id}`),
@@ -259,24 +233,6 @@ export default function PersonRecordPage() {
 
   async function setOperatorWarmth(level: OperatorWarmthLevel) {
     setError("");
-    // #region agent log
-    fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "4bef3e",
-      },
-      body: JSON.stringify({
-        sessionId: "4bef3e",
-        runId: "second-contact",
-        hypothesisId: "C",
-        location: "people/[id]/page.tsx:setOperatorWarmth",
-        message: "POST operator-temp start",
-        data: { level, personId: id },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     try {
       await api(`/people/${id}/operator-temp`, {
         method: "POST",
@@ -286,47 +242,7 @@ export default function PersonRecordPage() {
       window.setTimeout(() => setSaveHint(""), 1500);
       await load();
       setInspectReload((current) => current + 1);
-      // #region agent log
-      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "4bef3e",
-        },
-        body: JSON.stringify({
-          sessionId: "4bef3e",
-          runId: "second-contact",
-          hypothesisId: "C",
-          location: "people/[id]/page.tsx:setOperatorWarmth",
-          message: "POST operator-temp success",
-          data: { level, personId: id },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     } catch (err) {
-      // #region agent log
-      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "4bef3e",
-        },
-        body: JSON.stringify({
-          sessionId: "4bef3e",
-          runId: "second-contact",
-          hypothesisId: "C",
-          location: "people/[id]/page.tsx:setOperatorWarmth",
-          message: "POST operator-temp failed",
-          data: {
-            level,
-            personId: id,
-            error: err instanceof Error ? err.message : "unknown",
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setError(saveErrorMessage(err, "Failed to save judgment"));
     }
   }
@@ -848,27 +764,6 @@ export default function PersonRecordPage() {
                   }
                   const level = value as OperatorWarmthLevel;
                   setOperatorLevel(level);
-                  // #region agent log
-                  fetch(
-                    "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
-                    {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                        "X-Debug-Session-Id": "4bef3e",
-                      },
-                      body: JSON.stringify({
-                        sessionId: "4bef3e",
-                        runId: "second-contact",
-                        hypothesisId: "A",
-                        location: "people/[id]/page.tsx:select.onChange",
-                        message: "operator select changed",
-                        data: { level, personId: id },
-                        timestamp: Date.now(),
-                      }),
-                    },
-                  ).catch(() => {});
-                  // #endregion
                   void setOperatorWarmth(level);
                 }}
               >
@@ -967,27 +862,6 @@ export default function PersonRecordPage() {
           reloadToken={inspectReload}
           onChanged={() => void load()}
           onOperatorChange={(level) => {
-            // #region agent log
-            fetch(
-              "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-Debug-Session-Id": "4bef3e",
-                },
-                body: JSON.stringify({
-                  sessionId: "4bef3e",
-                  runId: "second-contact",
-                  hypothesisId: "A",
-                  location: "people/[id]/page.tsx:onOperatorChange",
-                  message: "inspect synced operatorLevel",
-                  data: { level, next: level ?? "" },
-                  timestamp: Date.now(),
-                }),
-              },
-            ).catch(() => {});
-            // #endregion
             setOperatorLevel(level ?? "");
           }}
         />
