@@ -1,14 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
   CompleteTaskBody,
+  HomeEmailItem,
+  HomeScheduleItem,
   HomeSnapshotResponse,
+  HomeTodo,
   HomeTodoKind,
 } from "@realm-labs/contracts";
 import {
+  groupHomeTodos,
   meetingTaskNeedsOutcome,
   personDisplayName,
   formatReportRate,
@@ -48,6 +58,13 @@ const KIND_CLASS: Record<HomeTodoKind, string> = {
   incubator: "text-primary",
 };
 
+function mailHref(item: HomeEmailItem): string {
+  if (item.kind === "task") {
+    return `/people/${item.person.id}`;
+  }
+  return item.person ? `/people/${item.person.id}` : "/inbox/unmatched";
+}
+
 export default function HomePage() {
   const router = useRouter();
   const { user } = useMe();
@@ -73,23 +90,74 @@ export default function HomePage() {
   }, [load]);
 
   const todos = useMemo(() => snapshot?.todos ?? [], [snapshot?.todos]);
-  const selected = useListNavigation(todos.length);
+  const groups = useMemo(() => groupHomeTodos(todos), [todos]);
+  const schedule = snapshot?.schedule ?? [];
+  const emails = snapshot?.emails ?? [];
+  const mailUnmatched = useMemo(() => {
+    const listed = new Set(
+      emails.flatMap((item) => (item.kind === "thread" ? [item.thread.id] : [])),
+    );
+    return groups.mail.filter((item) => {
+      if (!item.id.startsWith("email:")) {
+        return true;
+      }
+      return !listed.has(item.id.slice("email:".length));
+    });
+  }, [emails, groups.mail]);
+
+  const navHrefs = useMemo(() => {
+    const hrefs: string[] = [];
+    for (const item of schedule) {
+      hrefs.push(`/people/${item.person.id}`);
+    }
+    for (const item of groups.closeCalls) {
+      hrefs.push(item.href);
+    }
+    for (const item of groups.followUps) {
+      hrefs.push(item.href);
+    }
+    for (const item of groups.decisions) {
+      hrefs.push(item.href);
+    }
+    for (const item of emails) {
+      hrefs.push(mailHref(item));
+    }
+    for (const item of mailUnmatched) {
+      hrefs.push(item.href);
+    }
+    return hrefs;
+  }, [
+    emails,
+    groups.closeCalls,
+    groups.decisions,
+    groups.followUps,
+    mailUnmatched,
+    schedule,
+  ]);
+
+  const selected = useListNavigation(navHrefs.length);
+  const scheduleOffset = 0;
+  const closeOffset = scheduleOffset + schedule.length;
+  const followOffset = closeOffset + groups.closeCalls.length;
+  const decisionOffset = followOffset + groups.followUps.length;
+  const mailOffset = decisionOffset + groups.decisions.length;
+  const unmatchedOffset = mailOffset + emails.length;
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key !== "Enter" || isTypingTarget(event.target)) {
         return;
       }
-      const item = todos[selected];
-      if (!item) {
+      const href = navHrefs[selected];
+      if (!href) {
         return;
       }
       event.preventDefault();
-      router.push(item.href);
+      router.push(href);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [router, selected, todos]);
+  }, [navHrefs, router, selected]);
 
   async function completeMeetingTask(
     personId: string,
@@ -109,7 +177,6 @@ export default function HomePage() {
     }
   }
 
-  const counts = snapshot?.counts;
   const now = new Date();
 
   return (
@@ -137,15 +204,6 @@ export default function HomePage() {
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-      {counts ? (
-        <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <CountChip label="To do" value={counts.todo} />
-          <CountChip label="Meetings" value={counts.meetings} />
-          <CountChip label="Calls" value={counts.calls} />
-          <CountChip label="Emails" value={counts.emails} />
-        </dl>
-      ) : null}
-
       {snapshot?.deliverability ? (
         <p
           className={cn(
@@ -165,214 +223,369 @@ export default function HomePage() {
         </p>
       ) : null}
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium">Schedule</h2>
-        <p className="text-xs text-muted-foreground">
-          Calls and meetings on the calendar today.
-        </p>
+      <HomeSection
+        title="Schedule"
+        hint="Calls and meetings on the calendar today."
+      >
         {!loaded ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : !snapshot || snapshot.schedule.length === 0 ? (
+        ) : schedule.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No calls scheduled today.
           </p>
         ) : (
           <ul className="divide-y rounded-lg border">
-            {snapshot.schedule.map((item) => {
-              const due = meetingTaskNeedsOutcome(
-                item.task.dueAt,
-                item.task.status,
-                now,
-                item.task.needsReview,
-              );
-              return (
-                <li
-                  key={item.task.id}
-                  className="flex flex-wrap items-center justify-between gap-3 px-3 py-2"
-                >
-                  <div>
-                    <p className="flex flex-wrap items-baseline gap-x-2">
-                      <span className="font-mono text-[11px] uppercase tracking-wide text-canary">
-                        Call
-                      </span>
-                      <Link
-                        href={`/people/${item.person.id}`}
-                        className="text-sm font-medium hover:underline"
-                      >
-                        {personDisplayName(item.person)}
-                      </Link>
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatTime(item.task.dueAt)}
-                      {due ? " · needs outcome" : ""}
-                      {item.task.needsReview ? " · needs review" : ""}
-                    </p>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium">Emails today</h2>
-        <p className="text-xs text-muted-foreground">
-          Email tasks due today, plus inbox threads with activity today.
-        </p>
-        {!loaded ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : !snapshot || snapshot.emails.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No emails today.</p>
-        ) : (
-          <ul className="divide-y rounded-lg border">
-            {snapshot.emails.map((item) => {
-              if (item.kind === "task") {
-                return (
-                  <li key={`task:${item.task.id}`} className="px-3 py-2">
-                    <p className="flex flex-wrap items-baseline gap-x-2">
-                      <span className="font-mono text-[11px] uppercase tracking-wide text-teal">
-                        Email
-                      </span>
-                      <Link
-                        href={`/people/${item.person.id}`}
-                        className="text-sm font-medium hover:underline"
-                      >
-                        {personDisplayName(item.person)}
-                      </Link>
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatTime(item.task.dueAt)}
-                      {item.task.notes ? ` · ${item.task.notes}` : ""}
-                    </p>
-                  </li>
-                );
-              }
-              const href = item.person
-                ? `/people/${item.person.id}`
-                : "/inbox/unmatched";
-              return (
-                <li key={`thread:${item.thread.id}`} className="px-3 py-2">
-                  <p className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="font-mono text-[11px] uppercase tracking-wide text-teal">
-                      Email
-                    </span>
-                    <Link
-                      href={href}
-                      className="text-sm font-medium hover:underline"
-                    >
-                      {item.thread.subject || "(no subject)"}
-                    </Link>
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatTime(item.thread.lastMessageAt)}
-                    {item.person
-                      ? ` · ${personDisplayName(item.person)}`
-                      : " · unmatched"}
-                  </p>
-                  {item.thread.snippet ? (
-                    <p className="mt-1 truncate text-sm text-muted-foreground">
-                      {item.thread.snippet}
-                    </p>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium">To do</h2>
-        {!loaded ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : todos.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing due.</p>
-        ) : (
-          <ul className="divide-y rounded-lg border">
-            {todos.map((item, index) => (
-              <li
-                key={item.id}
-                data-nav-index={index}
-                className={cn(
-                  "space-y-2 px-3 py-2",
-                  index === selected && "bg-primary/10",
-                )}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="flex flex-wrap items-baseline gap-x-2">
-                      <span
-                        className={cn(
-                          "font-mono text-[11px] uppercase tracking-wide",
-                          KIND_CLASS[item.kind],
-                        )}
-                      >
-                        {KIND_LABEL[item.kind]}
-                      </span>
-                      <Link
-                        href={item.href}
-                        className="text-sm font-medium hover:underline"
-                      >
-                        {item.title}
-                      </Link>
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {item.at
-                        ? `${formatDateTime(item.at)} · ${item.detail}`
-                        : item.detail}
-                    </p>
-                  </div>
-                  {item.kind === "close_meeting" &&
-                  item.taskId &&
-                  item.personId ? (
-                    <button
-                      type="button"
-                      className="text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() =>
-                        setCompletingId((current) =>
-                          current === item.id ? null : item.id,
-                        )
-                      }
-                    >
-                      Log call outcome
-                    </button>
-                  ) : null}
-                </div>
-                {completingId === item.id &&
-                item.taskId &&
-                item.personId ? (
-                  <CompleteTaskForm
-                    task={{ id: item.taskId, kind: "meeting", notes: null }}
-                    requireFollowUp={false}
-                    hasExistingFollowUp={item.hasOpenFollowUp}
-                    onCancel={() => setCompletingId(null)}
-                    onSubmit={(body) => {
-                      const personId = item.personId;
-                      const taskId = item.taskId;
-                      if (!personId || !taskId) {
-                        return;
-                      }
-                      void completeMeetingTask(personId, taskId, body);
-                    }}
-                  />
-                ) : null}
-              </li>
+            {schedule.map((item, index) => (
+              <ScheduleRow
+                key={item.task.id}
+                item={item}
+                now={now}
+                navIndex={scheduleOffset + index}
+                active={selected === scheduleOffset + index}
+              />
             ))}
           </ul>
         )}
-      </section>
+      </HomeSection>
+
+      {groups.closeCalls.length > 0 ? (
+        <HomeSection
+          title="Close calls"
+          hint="Past calls still missing Held, No show, or Rescheduled."
+        >
+          <TodoList
+            items={groups.closeCalls}
+            startIndex={closeOffset}
+            selected={selected}
+            completingId={completingId}
+            onToggleComplete={setCompletingId}
+            onComplete={completeMeetingTask}
+            onCancelComplete={() => setCompletingId(null)}
+          />
+        </HomeSection>
+      ) : null}
+
+      {groups.followUps.length > 0 ? (
+        <HomeSection
+          title="Follow-ups"
+          hint="Open tasks due through today."
+        >
+          <TodoList
+            items={groups.followUps}
+            startIndex={followOffset}
+            selected={selected}
+            completingId={completingId}
+            onToggleComplete={setCompletingId}
+            onComplete={completeMeetingTask}
+            onCancelComplete={() => setCompletingId(null)}
+          />
+        </HomeSection>
+      ) : null}
+
+      {groups.decisions.length > 0 ? (
+        <HomeSection
+          title="Needs a decision"
+          hint="Track, review, and board waiting rooms."
+        >
+          <TodoList
+            items={groups.decisions}
+            startIndex={decisionOffset}
+            selected={selected}
+            completingId={completingId}
+            onToggleComplete={setCompletingId}
+            onComplete={completeMeetingTask}
+            onCancelComplete={() => setCompletingId(null)}
+          />
+        </HomeSection>
+      ) : null}
+
+      <HomeSection
+        title="Mail"
+        hint="Email tasks due today, inbox activity today, and unmatched threads."
+      >
+        {!loaded ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : emails.length === 0 && mailUnmatched.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No emails today.</p>
+        ) : (
+          <ul className="divide-y rounded-lg border">
+            {emails.map((item, index) => (
+              <MailRow
+                key={
+                  item.kind === "task"
+                    ? `task:${item.task.id}`
+                    : `thread:${item.thread.id}`
+                }
+                item={item}
+                navIndex={mailOffset + index}
+                active={selected === mailOffset + index}
+              />
+            ))}
+            {mailUnmatched.map((item, index) => (
+              <TodoRow
+                key={item.id}
+                item={item}
+                navIndex={unmatchedOffset + index}
+                active={selected === unmatchedOffset + index}
+                completingId={completingId}
+                onToggleComplete={setCompletingId}
+                onComplete={completeMeetingTask}
+                onCancelComplete={() => setCompletingId(null)}
+              />
+            ))}
+          </ul>
+        )}
+      </HomeSection>
     </div>
   );
 }
 
-function CountChip({ label, value }: { label: string; value: number }) {
+function HomeSection({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint: string;
+  children: ReactNode;
+}) {
   return (
-    <div className="rounded-lg border bg-card px-3 py-2">
-      <dt className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-        {label}
-      </dt>
-      <dd className="font-heading text-lg font-semibold tabular-nums">{value}</dd>
-    </div>
+    <section className="space-y-2">
+      <h2 className="text-sm font-medium">{title}</h2>
+      <p className="text-xs text-muted-foreground">{hint}</p>
+      {children}
+    </section>
+  );
+}
+
+function ScheduleRow({
+  item,
+  now,
+  navIndex,
+  active,
+}: {
+  item: HomeScheduleItem;
+  now: Date;
+  navIndex: number;
+  active: boolean;
+}) {
+  const due = meetingTaskNeedsOutcome(
+    item.task.dueAt,
+    item.task.status,
+    now,
+    item.task.needsReview,
+  );
+  return (
+    <li
+      data-nav-index={navIndex}
+      className={cn(
+        "flex flex-wrap items-center justify-between gap-3 px-3 py-2",
+        active && "bg-primary/10",
+      )}
+    >
+      <div>
+        <p className="flex flex-wrap items-baseline gap-x-2">
+          <span className="font-mono text-[11px] uppercase tracking-wide text-canary">
+            Call
+          </span>
+          <Link
+            href={`/people/${item.person.id}`}
+            className="text-sm font-medium hover:underline"
+          >
+            {personDisplayName(item.person)}
+          </Link>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {formatTime(item.task.dueAt)}
+          {due ? " · needs outcome" : ""}
+          {item.task.needsReview ? " · needs review" : ""}
+        </p>
+      </div>
+    </li>
+  );
+}
+
+function TodoList({
+  items,
+  startIndex,
+  selected,
+  completingId,
+  onToggleComplete,
+  onComplete,
+  onCancelComplete,
+}: {
+  items: HomeTodo[];
+  startIndex: number;
+  selected: number;
+  completingId: string | null;
+  onToggleComplete: (id: string | null) => void;
+  onComplete: (
+    personId: string,
+    taskId: string,
+    body: CompleteTaskBody,
+  ) => void;
+  onCancelComplete: () => void;
+}) {
+  return (
+    <ul className="divide-y rounded-lg border">
+      {items.map((item, index) => (
+        <TodoRow
+          key={item.id}
+          item={item}
+          navIndex={startIndex + index}
+          active={selected === startIndex + index}
+          completingId={completingId}
+          onToggleComplete={onToggleComplete}
+          onComplete={onComplete}
+          onCancelComplete={onCancelComplete}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function TodoRow({
+  item,
+  navIndex,
+  active,
+  completingId,
+  onToggleComplete,
+  onComplete,
+  onCancelComplete,
+}: {
+  item: HomeTodo;
+  navIndex: number;
+  active: boolean;
+  completingId: string | null;
+  onToggleComplete: (id: string | null) => void;
+  onComplete: (
+    personId: string,
+    taskId: string,
+    body: CompleteTaskBody,
+  ) => void;
+  onCancelComplete: () => void;
+}) {
+  return (
+    <li
+      data-nav-index={navIndex}
+      className={cn("space-y-2 px-3 py-2", active && "bg-primary/10")}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="flex flex-wrap items-baseline gap-x-2">
+            <span
+              className={cn(
+                "font-mono text-[11px] uppercase tracking-wide",
+                KIND_CLASS[item.kind],
+              )}
+            >
+              {KIND_LABEL[item.kind]}
+            </span>
+            <Link
+              href={item.href}
+              className="text-sm font-medium hover:underline"
+            >
+              {item.title}
+            </Link>
+          </p>
+          <p className="truncate text-xs text-muted-foreground">
+            {item.at
+              ? `${formatDateTime(item.at)} · ${item.detail}`
+              : item.detail}
+          </p>
+        </div>
+        {item.kind === "close_meeting" && item.taskId && item.personId ? (
+          <button
+            type="button"
+            className="text-xs text-muted-foreground hover:text-foreground"
+            onClick={() =>
+              onToggleComplete(completingId === item.id ? null : item.id)
+            }
+          >
+            Log call outcome
+          </button>
+        ) : null}
+      </div>
+      {completingId === item.id && item.taskId && item.personId ? (
+        <CompleteTaskForm
+          task={{ id: item.taskId, kind: "meeting", notes: null }}
+          requireFollowUp={false}
+          hasExistingFollowUp={item.hasOpenFollowUp}
+          onCancel={onCancelComplete}
+          onSubmit={(body) => {
+            const personId = item.personId;
+            const taskId = item.taskId;
+            if (!personId || !taskId) {
+              return;
+            }
+            onComplete(personId, taskId, body);
+          }}
+        />
+      ) : null}
+    </li>
+  );
+}
+
+function MailRow({
+  item,
+  navIndex,
+  active,
+}: {
+  item: HomeEmailItem;
+  navIndex: number;
+  active: boolean;
+}) {
+  if (item.kind === "task") {
+    return (
+      <li
+        data-nav-index={navIndex}
+        className={cn("px-3 py-2", active && "bg-primary/10")}
+      >
+        <p className="flex flex-wrap items-baseline gap-x-2">
+          <span className="font-mono text-[11px] uppercase tracking-wide text-teal">
+            Email
+          </span>
+          <Link
+            href={`/people/${item.person.id}`}
+            className="text-sm font-medium hover:underline"
+          >
+            {personDisplayName(item.person)}
+          </Link>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {formatTime(item.task.dueAt)}
+          {item.task.notes ? ` · ${item.task.notes}` : ""}
+        </p>
+      </li>
+    );
+  }
+  const href = item.person
+    ? `/people/${item.person.id}`
+    : "/inbox/unmatched";
+  return (
+    <li
+      data-nav-index={navIndex}
+      className={cn("px-3 py-2", active && "bg-primary/10")}
+    >
+      <p className="flex flex-wrap items-baseline gap-x-2">
+        <span className="font-mono text-[11px] uppercase tracking-wide text-teal">
+          Email
+        </span>
+        <Link href={href} className="text-sm font-medium hover:underline">
+          {item.thread.subject || "(no subject)"}
+        </Link>
+      </p>
+      <p className="text-xs text-muted-foreground">
+        {formatTime(item.thread.lastMessageAt)}
+        {item.person
+          ? ` · ${personDisplayName(item.person)}`
+          : " · unmatched"}
+      </p>
+      {item.thread.snippet ? (
+        <p className="mt-1 truncate text-sm text-muted-foreground">
+          {item.thread.snippet}
+        </p>
+      ) : null}
+    </li>
   );
 }

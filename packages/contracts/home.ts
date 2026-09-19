@@ -52,6 +52,52 @@ const KIND_ORDER: Record<HomeTodoKind, number> = {
   incubator: 8,
 };
 
+export const HOME_TODO_GROUPS = [
+  "close_calls",
+  "follow_ups",
+  "decisions",
+  "mail",
+] as const;
+export type HomeTodoGroup = (typeof HOME_TODO_GROUPS)[number];
+
+export function homeTodoGroup(kind: HomeTodoKind): HomeTodoGroup {
+  if (kind === "close_meeting") {
+    return "close_calls";
+  }
+  if (kind === "task") {
+    return "follow_ups";
+  }
+  if (kind === "email") {
+    return "mail";
+  }
+  return "decisions";
+}
+
+export function groupHomeTodos(todos: HomeTodo[]): {
+  closeCalls: HomeTodo[];
+  followUps: HomeTodo[];
+  decisions: HomeTodo[];
+  mail: HomeTodo[];
+} {
+  const closeCalls: HomeTodo[] = [];
+  const followUps: HomeTodo[] = [];
+  const decisions: HomeTodo[] = [];
+  const mail: HomeTodo[] = [];
+  for (const item of todos) {
+    const group = homeTodoGroup(item.kind);
+    if (group === "close_calls") {
+      closeCalls.push(item);
+    } else if (group === "follow_ups") {
+      followUps.push(item);
+    } else if (group === "mail") {
+      mail.push(item);
+    } else {
+      decisions.push(item);
+    }
+  }
+  return { closeCalls, followUps, decisions, mail };
+}
+
 export const homeTodoSchema = z.object({
   id: z.string().min(1),
   kind: homeTodoKindSchema,

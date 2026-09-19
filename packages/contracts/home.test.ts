@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHomeTodos,
+  groupHomeTodos,
   homeCounts,
   homeEmailItemSchema,
+  homeTodoGroup,
   meetingTaskNeedsOutcome,
 } from "./home";
 import type { HomeScheduleItem } from "./home";
@@ -136,6 +138,31 @@ describe("home day snapshot", () => {
     expect(counts.meetings).toBe(3);
     expect(counts.calls).toBe(4);
     expect(counts.emails).toBe(4);
+
+    expect(todos.map((item) => homeTodoGroup(item.kind))).toEqual([
+      "close_calls",
+      "close_calls",
+      "decisions",
+      "decisions",
+      "decisions",
+      "follow_ups",
+      "mail",
+      "decisions",
+      "decisions",
+      "decisions",
+    ]);
+    const grouped = groupHomeTodos(todos);
+    expect(grouped.closeCalls).toHaveLength(2);
+    expect(grouped.followUps.map((item) => item.kind)).toEqual(["task"]);
+    expect(grouped.mail.map((item) => item.kind)).toEqual(["email"]);
+    expect(grouped.decisions.map((item) => item.kind)).toEqual([
+      "campaign_review",
+      "needs_track",
+      "needs_review",
+      "call",
+      "decision",
+      "incubator",
+    ]);
   });
 
   it("marks leftover call close when a later follow-up is already open", () => {
