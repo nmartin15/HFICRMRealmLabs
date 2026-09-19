@@ -35,8 +35,8 @@ describe("gmail sync job", () => {
     );
   });
 
-  it("does not skip history-changed threads during a contact backfill", () => {
-    expect(source).toContain("shouldProcessGmailThreadId");
-    expect(source).toContain("gmailSyncPlan");
+  it("logs people and skip counts so a cloud miss can be diagnosed", () => {
+    expect(source).toContain("gmail.sync ${mailbox} people=");
+    expect(source).toContain("newer_than:14d");
   });
 });

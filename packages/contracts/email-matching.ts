@@ -70,16 +70,19 @@ export function isMailboxAddress(
 }
 
 export const GMAIL_SEARCH_QUERY_MAX_CHARS = 900;
+/** Gmail silently drops terms from large OR queries; one contact per request stays reliable. */
+export const GMAIL_SEARCH_QUERY_MAX_CLAUSES = 1;
 
 export function gmailAddressSearchClause(email: string): string {
   const quoted = `"${normalizeEmail(email).replaceAll('"', "")}"`;
-  return `(from:${quoted} OR to:${quoted} OR cc:${quoted})`;
+  return `(from:${quoted} OR to:${quoted} OR cc:${quoted} OR bcc:${quoted})`;
 }
 
 export function gmailContactSearchQueries(
   emails: readonly string[],
   mailboxAddresses: readonly string[] = mailboxEmails(),
   maxChars = GMAIL_SEARCH_QUERY_MAX_CHARS,
+  maxClauses = GMAIL_SEARCH_QUERY_MAX_CLAUSES,
 ): string[] {
   const clauses = uniqueEmails(emails)
     .filter((email) => !isMailboxAddress(email, mailboxAddresses))
@@ -87,13 +90,20 @@ export function gmailContactSearchQueries(
 
   const queries: string[] = [];
   let current = "";
+  let currentClauses = 0;
   for (const clause of clauses) {
     const next = current ? `${current} OR ${clause}` : clause;
-    if (current && next.length > maxChars) {
+    const nextClauses = currentClauses + 1;
+    if (
+      current &&
+      (nextClauses > maxClauses || next.length > maxChars)
+    ) {
       queries.push(current);
       current = clause;
+      currentClauses = 1;
     } else {
       current = next;
+      currentClauses = nextClauses;
     }
   }
   if (current) {

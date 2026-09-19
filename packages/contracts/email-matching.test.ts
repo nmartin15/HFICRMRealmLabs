@@ -299,7 +299,7 @@ describe("email matching", () => {
 
   it("builds Gmail search clauses for contact addresses", () => {
     expect(gmailAddressSearchClause("Jane@Example.COM")).toBe(
-      '(from:"jane@example.com" OR to:"jane@example.com" OR cc:"jane@example.com")',
+      '(from:"jane@example.com" OR to:"jane@example.com" OR cc:"jane@example.com" OR bcc:"jane@example.com")',
     );
     expect(
       gmailContactSearchQueries(
@@ -307,8 +307,19 @@ describe("email matching", () => {
         mailboxes,
       ),
     ).toEqual([
-      `${gmailAddressSearchClause(jane.email)} OR ${gmailAddressSearchClause(alex.email)}`,
+      gmailAddressSearchClause(jane.email),
+      gmailAddressSearchClause(alex.email),
     ]);
+  });
+
+  it("keeps one contact per Gmail search so OR terms are not truncated", () => {
+    const emails = Array.from(
+      { length: 20 },
+      (_unused, index) => `person${index}@example.com`,
+    );
+    const queries = gmailContactSearchQueries(emails, mailboxes);
+    expect(queries).toHaveLength(20);
+    expect(queries.every((query) => query.startsWith("(from:"))).toBe(true);
   });
 
   it("batches Gmail search queries under the character limit", () => {

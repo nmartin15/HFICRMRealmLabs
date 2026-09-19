@@ -184,7 +184,6 @@ async function listChangedThreadIds(
         const response = await gmail.users.history.list({
           userId: "me",
           startHistoryId,
-          historyTypes: ["messageAdded"],
           pageToken,
         });
         return response.data;
@@ -772,6 +771,14 @@ export async function runGmailSync(
         addresses,
         budget,
       );
+      for (const threadId of await listThreadIdsForQuery(
+        gmail,
+        budget,
+        "newer_than:14d -in:chats",
+      )) {
+        backfillIds.push(threadId);
+      }
+      backfillIds = [...new Set(backfillIds)];
     }
 
     const threadIds = [...new Set([...historyThreadIds, ...backfillIds])];
@@ -806,7 +813,7 @@ export async function runGmailSync(
     }
     historyProcessingComplete = true;
     console.log(
-      `gmail.sync ${mailbox} history=${historyThreadIds.length} backfill=${backfillIds.length} listed=${threadIds.length}`,
+      `gmail.sync ${mailbox} people=${personRows.length} history=${historyThreadIds.length} backfill=${backfillIds.length} listed=${threadIds.length} stale=${historyStale} skip=${skipThreadIds.size}`,
     );
 
     await markSyncOk(db, mailbox, checkpoint);
