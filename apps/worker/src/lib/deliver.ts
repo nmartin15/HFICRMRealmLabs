@@ -79,12 +79,14 @@ async function loadDeliveryPlan(
   );
   let doNotContact = false;
   let emailUndeliverable = false;
+  let contactKind: "contact" | "recruiter" = "contact";
   if (send.personId) {
     const personRows = await db
       .select({
         doNotContact: people.doNotContact,
         deletedAt: people.deletedAt,
         emailVerificationResult: people.emailVerificationResult,
+        contactKind: people.contactKind,
       })
       .from(people)
       .where(eq(people.id, send.personId))
@@ -94,6 +96,7 @@ async function loadDeliveryPlan(
     emailUndeliverable = kickboxBlocksSend(
       parseKickboxResult(person?.emailVerificationResult),
     );
+    contactKind = person?.contactKind ?? "contact";
   }
   const consentRows = send.personId
     ? await db
@@ -112,6 +115,7 @@ async function loadDeliveryPlan(
     newsletterGranted: hasNewsletterGrant(consentRows),
     emailUndeliverable,
     isSeed: send.isSeed,
+    contactKind,
   });
 }
 

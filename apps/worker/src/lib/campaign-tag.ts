@@ -73,7 +73,7 @@ export async function persistCampaignTag(
   ]);
 
   const resolved =
-    input.bucket === null
+    input.bucket === null || input.person.contactKind === "recruiter"
       ? null
       : resolveCampaignTag({
           bucket: input.bucket,
@@ -83,6 +83,7 @@ export async function persistCampaignTag(
           stayInTouch: hasStayInTouch(consentRows),
           doNotContact: input.person.doNotContact,
           newsletterGranted: hasNewsletterGrant(consentRows),
+          contactKind: input.person.contactKind,
         });
 
   const existing = existingRows[0] ?? null;

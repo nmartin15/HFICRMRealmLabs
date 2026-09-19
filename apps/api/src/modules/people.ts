@@ -10,19 +10,23 @@ import {
   currentBoardBadge,
   isPipelineBoardTrack,
   mergePersonTimeline,
+  taskGuidePayloadsFromActivities,
   okResponseSchema,
   operatorTasksQuerySchema,
   personBoardBadgeSchema,
   personDetailResponseSchema,
   personIdParamsSchema,
+  personListQuerySchema,
   personListResponseSchema,
   personNoteResponseSchema,
   personPatchSchema,
   personSchema,
   planCompleteTask,
+  planContactKindChange,
   planCreateTask,
   planDoNotContactChange,
   planLeadTempPatch,
+  planRecruiterSource,
   planUpdateTask,
   operatorTempBodySchema,
   todayIsoInDisplayZone,
@@ -34,6 +38,7 @@ import {
 } from "@realm-labs/contracts";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import {
   activities,
   allocationCards,
@@ -52,6 +57,10 @@ import {
 } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
 import { createManualContact } from "../lib/contacts.js";
+import {
+  loadSourceRecruiterSummary,
+  loadSourceRecruiterTarget,
+} from "../lib/recruiters.js";
 import { ingestExtractedText } from "../lib/signals.js";
 import {
   enqueuePersonScore,
@@ -162,20 +171,24 @@ async function personTimeline(
 
   const altMap = await listAlternateEmailsByPerson(db, [person.id]);
   const personEmails = [person.email, ...(altMap.get(person.id) ?? [])];
+  const serializedActivities = activityRows.map((row) =>
+    activitySchema.parse(serializeActivity(row)),
+  );
 
-  return mergePersonTimeline({
-    activities: activityRows.map((row) =>
-      activitySchema.parse(serializeActivity(row)),
-    ),
-    threads: visibleThreads.map((row) =>
-      serializeEmailThreadWithMessages(
-        row,
-        messagesByThread.get(row.id) ?? [],
-        person.email,
-        personEmails,
+  return {
+    timeline: mergePersonTimeline({
+      activities: serializedActivities,
+      threads: visibleThreads.map((row) =>
+        serializeEmailThreadWithMessages(
+          row,
+          messagesByThread.get(row.id) ?? [],
+          person.email,
+          personEmails,
+        ),
       ),
-    ),
-  });
+    }),
+    taskGuidePayloads: taskGuidePayloadsFromActivities(serializedActivities),
+  };
 }
 
 async function personBoard(
@@ -204,11 +217,26 @@ async function personBoard(
   return badge ? personBoardBadgeSchema.parse(badge) : null;
 }
 
+const sourceRecruiters = alias(people, "source_recruiters");
+
+async function serializedPerson(
+  db: Database,
+  row: typeof people.$inferSelect,
+) {
+  return personSchema.parse(
+    serializePerson(
+      row,
+      await loadSourceRecruiterSummary(db, row.sourceRecruiterId),
+    ),
+  );
+}
+
 export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/people",
     {
       schema: {
+        querystring: personListQuerySchema,
         response: { 200: personListResponseSchema },
       },
     },
@@ -218,15 +246,47 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         throw httpError(403, "FORBIDDEN", "Forbidden");
       }
 
+      const filters = [
+        isNull(people.deletedAt),
+        eq(people.doNotContact, false),
+      ];
+      if (req.query.contactKind) {
+        filters.push(eq(people.contactKind, req.query.contactKind));
+      }
+
       const rows = await app.db
-        .select()
+        .select({
+          person: people,
+          sourceRecruiterId: sourceRecruiters.id,
+          sourceRecruiterFirstName: sourceRecruiters.firstName,
+          sourceRecruiterLastName: sourceRecruiters.lastName,
+          sourceRecruiterSpecialty: sourceRecruiters.recruiterSpecialty,
+        })
         .from(people)
-        .where(and(isNull(people.deletedAt), eq(people.doNotContact, false)))
+        .leftJoin(
+          sourceRecruiters,
+          eq(people.sourceRecruiterId, sourceRecruiters.id),
+        )
+        .where(and(...filters))
         // DNC people are omitted from lists and exports; the record page still loads.
         .orderBy(asc(people.lastName), asc(people.firstName));
 
       return {
-        data: rows.map((row) => personSchema.parse(serializePerson(row))),
+        data: rows.map((row) =>
+          personSchema.parse(
+            serializePerson(
+              row.person,
+              row.sourceRecruiterId
+                ? {
+                    id: row.sourceRecruiterId,
+                    firstName: row.sourceRecruiterFirstName ?? "",
+                    lastName: row.sourceRecruiterLastName ?? "",
+                    recruiterSpecialty: row.sourceRecruiterSpecialty,
+                  }
+                : null,
+            ),
+          ),
+        ),
       };
     },
   );
@@ -266,7 +326,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const row = await requirePerson(app.db, req.params.id);
-      const [board, timeline, taskRows, snapshotRows, campaignHoldRows] = await Promise.all([
+      const [board, history, taskRows, snapshotRows, campaignHoldRows] = await Promise.all([
         personBoard(app.db, row),
         personTimeline(app.db, row, actor),
         app.db
@@ -301,10 +361,11 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           : null;
 
       return personDetailResponseSchema.parse({
-        person: serializePerson(row),
+        person: await serializedPerson(app.db, row),
         board,
         tasks: taskRows.map((task) => serializeTask(task)),
-        timeline,
+        timeline: history.timeline,
+        taskGuidePayloads: history.taskGuidePayloads,
         scoreHoldSummary: hold?.success ? hold.data.summary : null,
         campaignHold,
       });
@@ -351,6 +412,10 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         resumeFilename?: string | null;
         resumeContentType?: string | null;
         ownerId?: string | null;
+        contactKind?: typeof row.contactKind;
+        recruiterSpecialty?: typeof row.recruiterSpecialty;
+        source?: typeof row.source;
+        sourceRecruiterId?: typeof row.sourceRecruiterId;
       } = {};
 
       if (
@@ -459,8 +524,83 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         update.ownerId = patch.ownerId;
       }
 
+      const nextKind = patch.contactKind ?? row.contactKind;
+      const nextSpecialty =
+        patch.recruiterSpecialty !== undefined
+          ? patch.recruiterSpecialty
+          : row.recruiterSpecialty;
+      const nextSource = patch.source ?? row.source;
+      const nextRecruiterId =
+        patch.sourceRecruiterId !== undefined
+          ? patch.sourceRecruiterId
+          : row.sourceRecruiterId;
+      const nextTrack =
+        update.programTrack !== undefined
+          ? update.programTrack
+          : row.programTrack;
+
+      if (
+        patch.contactKind !== undefined ||
+        patch.recruiterSpecialty !== undefined ||
+        patch.source !== undefined ||
+        patch.sourceRecruiterId !== undefined ||
+        patch.programTrack !== undefined
+      ) {
+        const [allocRows, incubRows] = await Promise.all([
+          app.db
+            .select({ id: allocationCards.id })
+            .from(allocationCards)
+            .where(eq(allocationCards.personId, row.id))
+            .limit(1),
+          app.db
+            .select({ id: incubatorCards.id })
+            .from(incubatorCards)
+            .where(eq(incubatorCards.personId, row.id))
+            .limit(1),
+        ]);
+        const kindPlan = planContactKindChange({
+          contactKind: nextKind,
+          recruiterSpecialty: nextSpecialty,
+          programTrack: nextTrack ?? null,
+          hasBoardCard: Boolean(allocRows[0] || incubRows[0]),
+          source: nextSource,
+        });
+        if (!kindPlan.ok) {
+          throw httpError(kindPlan.status, kindPlan.code, kindPlan.message);
+        }
+        const sourcePlan = planRecruiterSource({
+          source: nextSource,
+          sourceRecruiterId: nextRecruiterId,
+          personId: row.id,
+          target: await loadSourceRecruiterTarget(app.db, nextRecruiterId),
+        });
+        if (!sourcePlan.ok) {
+          throw httpError(sourcePlan.status, sourcePlan.code, sourcePlan.message);
+        }
+        if (kindPlan.contactKind !== row.contactKind) {
+          before.contactKind = row.contactKind;
+          after.contactKind = kindPlan.contactKind;
+          update.contactKind = kindPlan.contactKind;
+        }
+        if (kindPlan.recruiterSpecialty !== row.recruiterSpecialty) {
+          before.recruiterSpecialty = row.recruiterSpecialty;
+          after.recruiterSpecialty = kindPlan.recruiterSpecialty;
+          update.recruiterSpecialty = kindPlan.recruiterSpecialty;
+        }
+        if (sourcePlan.source !== row.source) {
+          before.source = row.source;
+          after.source = sourcePlan.source;
+          update.source = sourcePlan.source;
+        }
+        if (sourcePlan.sourceRecruiterId !== row.sourceRecruiterId) {
+          before.sourceRecruiterId = row.sourceRecruiterId;
+          after.sourceRecruiterId = sourcePlan.sourceRecruiterId;
+          update.sourceRecruiterId = sourcePlan.sourceRecruiterId;
+        }
+      }
+
       if (Object.keys(update).length === 0) {
-        return personSchema.parse(serializePerson(row));
+        return serializedPerson(app.db, row);
       }
 
       if (update.doNotContact === true) {
@@ -530,7 +670,8 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       if (
         after.budgetQualified !== undefined ||
         after.programTrack !== undefined ||
-        after.leadTemp !== undefined
+        after.leadTemp !== undefined ||
+        after.contactKind !== undefined
       ) {
         await enqueuePersonScore(app.queues, {
           personId: updated.id,
@@ -539,7 +680,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         });
       }
 
-      return personSchema.parse(serializePerson(updated));
+      return serializedPerson(app.db, updated);
     },
   );
 
@@ -586,7 +727,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         trigger: "operator_temp",
         computedBy: actor.id,
       });
-      return personSchema.parse(serializePerson(row));
+      return serializedPerson(app.db, row);
     },
   );
 
@@ -650,7 +791,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           },
         },
       });
-      return personSchema.parse(serializePerson(updated));
+      return serializedPerson(app.db, updated);
     },
   );
 

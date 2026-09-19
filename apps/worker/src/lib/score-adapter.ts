@@ -610,7 +610,10 @@ export async function runScore(
     return { skipped: true, breakdown: null, dryRow: null };
   }
   const reason = await suppressionReason(db, person.email, env.EMAIL_HASH_KEY);
-  const suppressed = shouldSkipScore(reason) || person.doNotContact;
+  const suppressed =
+    shouldSkipScore(reason) ||
+    person.doNotContact ||
+    person.contactKind === "recruiter";
   if (suppressed) {
     if (input.mode === "commit") {
       await persistCampaignTag(db, env, {
@@ -974,7 +977,13 @@ export async function nightlyScoreAll(
   const rows = await db
     .select({ id: people.id })
     .from(people)
-    .where(and(isNull(people.deletedAt), eq(people.doNotContact, false)));
+    .where(
+      and(
+        isNull(people.deletedAt),
+        eq(people.doNotContact, false),
+        eq(people.contactKind, "contact"),
+      ),
+    );
   const formula = await loadActiveScoreFormula(db);
   let scored = 0;
   let drifted = 0;

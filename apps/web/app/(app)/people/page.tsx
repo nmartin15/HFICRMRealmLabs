@@ -9,6 +9,7 @@ import type {
 } from "@realm-labs/contracts";
 import {
   PROGRAM_TRACK_LABELS,
+  RECRUITER_SPECIALTY_LABELS,
   personDisplayName,
 } from "@realm-labs/contracts";
 import { api } from "@/lib/api";
@@ -34,7 +35,13 @@ function matchesQuery(person: Person, query: string): boolean {
     person.location,
     person.programTrack
       ? PROGRAM_TRACK_LABELS[person.programTrack]
-      : "Not applied",
+      : person.contactKind === "recruiter"
+        ? "Recruiter"
+        : "Not applied",
+    person.contactKind === "recruiter" ? "recruiter" : "",
+    person.recruiterSpecialty
+      ? RECRUITER_SPECIALTY_LABELS[person.recruiterSpecialty]
+      : "",
   ]
     .filter((value): value is string => Boolean(value))
     .join(" ")
@@ -43,6 +50,11 @@ function matchesQuery(person: Person, query: string): boolean {
 }
 
 function trackLabel(person: Person): string {
+  if (person.contactKind === "recruiter") {
+    return person.recruiterSpecialty
+      ? RECRUITER_SPECIALTY_LABELS[person.recruiterSpecialty]
+      : "Recruiter";
+  }
   if (!person.programTrack) {
     return "Not applied";
   }
@@ -53,6 +65,7 @@ export default function ContactsPage() {
   const router = useRouter();
   const [people, setPeople] = useState<Person[]>([]);
   const [query, setQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState<"all" | "recruiter">("all");
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -71,8 +84,14 @@ export default function ContactsPage() {
   }, [load]);
 
   const rows = useMemo(
-    () => people.filter((person) => matchesQuery(person, query.trim())),
-    [people, query],
+    () =>
+      people.filter((person) => {
+        if (kindFilter === "recruiter" && person.contactKind !== "recruiter") {
+          return false;
+        }
+        return matchesQuery(person, query.trim());
+      }),
+    [kindFilter, people, query],
   );
   const selected = useListNavigation(createOpen ? 0 : rows.length);
   const focused = rows[selected];
@@ -122,6 +141,17 @@ export default function ContactsPage() {
         onChange={(event) => setQuery(event.target.value)}
         aria-label="Search contacts"
       />
+      <select
+        aria-label="Filter contacts"
+        className="h-8 w-full max-w-xs rounded-lg border border-input bg-background px-2 text-sm"
+        value={kindFilter}
+        onChange={(event) =>
+          setKindFilter(event.target.value === "recruiter" ? "recruiter" : "all")
+        }
+      >
+        <option value="all">All contacts</option>
+        <option value="recruiter">Recruiters</option>
+      </select>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
@@ -159,7 +189,7 @@ export default function ContactsPage() {
                 <span
                   className={cn(
                     "shrink-0 text-xs",
-                    person.programTrack
+                    person.contactKind === "recruiter" || person.programTrack
                       ? "text-muted-foreground"
                       : "text-canary",
                   )}

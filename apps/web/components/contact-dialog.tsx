@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import type {
+  ContactKind,
   CreatePersonBody,
   CreatePersonResponse,
   PersonSource,
+  RecruiterSpecialty,
   TaskKind,
 } from "@realm-labs/contracts";
 import { TASK_KIND_LABELS } from "@realm-labs/contracts";
@@ -13,8 +15,15 @@ import { fromDatetimeLocalValue, todayTaskDueLocal } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  ContactKindSelect,
+  MANUAL_SOURCES,
+  RecruiterPicker,
+  RecruiterSpecialtySelect,
+  SourceSelect,
+  useRecruiters,
+} from "@/components/recruiter-fields";
 
-const SOURCES: PersonSource[] = ["linkedin", "workable", "referral", "other"];
 const TASK_KINDS: TaskKind[] = ["email", "call", "meeting", "dnc"];
 const RESUME_TYPES = new Set([
   "application/pdf",
@@ -47,12 +56,22 @@ export function ContactDialog({
   const [company, setCompany] = useState("");
   const [location, setLocation] = useState("");
   const [source, setSource] = useState<PersonSource>("other");
+  const [contactKind, setContactKind] = useState<ContactKind>("contact");
+  const [recruiterSpecialty, setRecruiterSpecialty] = useState<
+    RecruiterSpecialty | ""
+  >("");
+  const [sourceRecruiterId, setSourceRecruiterId] = useState("");
   const [notes, setNotes] = useState("");
   const [firstTaskKind, setFirstTaskKind] = useState<TaskKind | "">("");
   const [firstTaskDue, setFirstTaskDue] = useState(todayTaskDueLocal);
   const [firstTaskNotes, setFirstTaskNotes] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const recruiters = useRecruiters(open);
+  const sourceOptions =
+    contactKind === "recruiter"
+      ? MANUAL_SOURCES.filter((value) => value !== "recruiter")
+      : MANUAL_SOURCES;
 
   useEffect(() => {
     const node = ref.current;
@@ -66,6 +85,9 @@ export function ContactDialog({
       setCompany("");
       setLocation("");
       setSource("other");
+      setContactKind("contact");
+      setRecruiterSpecialty("");
+      setSourceRecruiterId("");
       setNotes("");
       setFirstTaskKind("");
       setFirstTaskDue(todayTaskDueLocal());
@@ -98,7 +120,14 @@ export function ContactDialog({
       name: name.trim(),
       email: email.trim(),
       source,
+      contactKind,
     };
+    if (contactKind === "recruiter" && recruiterSpecialty) {
+      body.recruiterSpecialty = recruiterSpecialty;
+    }
+    if (source === "recruiter" && sourceRecruiterId) {
+      body.sourceRecruiterId = sourceRecruiterId;
+    }
     if (title.trim()) {
       body.title = title.trim();
     }
@@ -209,23 +238,49 @@ export function ContactDialog({
               onChange={(event) => setLocation(event.target.value)}
             />
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="contact-source">Source</Label>
-            <select
-              id="contact-source"
-              className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
-              value={source}
-              onChange={(event) =>
-                setSource(event.target.value as PersonSource)
+          <ContactKindSelect
+            id="contact-kind"
+            value={contactKind}
+            onChange={(value) => {
+              setContactKind(value);
+              if (value === "recruiter") {
+                setSource((current) =>
+                  current === "recruiter" ? "other" : current,
+                );
+                setSourceRecruiterId("");
+              } else {
+                setRecruiterSpecialty("");
               }
-            >
-              {SOURCES.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
+            }}
+          />
+          {contactKind === "recruiter" ? (
+            <RecruiterSpecialtySelect
+              id="contact-specialty"
+              required
+              value={recruiterSpecialty}
+              onChange={setRecruiterSpecialty}
+            />
+          ) : null}
+          <SourceSelect
+            id="contact-source"
+            value={source}
+            sources={sourceOptions}
+            onChange={(value) => {
+              setSource(value);
+              if (value !== "recruiter") {
+                setSourceRecruiterId("");
+              }
+            }}
+          />
+          {source === "recruiter" ? (
+            <RecruiterPicker
+              id="contact-source-recruiter"
+              required
+              value={sourceRecruiterId}
+              recruiters={recruiters}
+              onChange={setSourceRecruiterId}
+            />
+          ) : null}
           <div className="space-y-1">
             <Label htmlFor="contact-notes">Notes</Label>
             <textarea

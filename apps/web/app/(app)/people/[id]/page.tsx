@@ -6,12 +6,15 @@ import { useParams } from "next/navigation";
 import type {
   CampaignTagPayload,
   CompleteTaskBody,
+  ContactKind,
   EmailMessageDirection,
   Person,
   PersonDetailResponse,
   PersonPatch,
+  PersonSource,
   ProgramTrack,
   OperatorWarmthLevel,
+  RecruiterSpecialty,
   Task,
   TaskKind,
   TimelineItem,
@@ -25,6 +28,7 @@ import {
   LEAD_TEMP_LABELS,
   OPERATOR_WARMTH_LABELS,
   PROGRAM_TRACK_LABELS,
+  RECRUITER_SPECIALTY_LABELS,
   SCORE_FORMULA_V1,
   TASK_KIND_LABELS,
   canInspectScoring,
@@ -33,6 +37,7 @@ import {
   displayScoreBucket,
   explainDisplayVsCampaign,
   hasExistingOpenFollowUp,
+  personDisplayName,
 } from "@realm-labs/contracts";
 import { api, ApiError } from "@/lib/api";
 import { activityActorLabel, activitySummary } from "@/lib/activity-summary";
@@ -51,14 +56,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-
-const SOURCE_LABEL: Record<Person["source"], string> = {
-  linkedin: "LinkedIn",
-  workable: "Workable",
-  referral: "Referral",
-  other: "Other",
-  website: "Website",
-};
+import {
+  ContactKindSelect,
+  MANUAL_SOURCES,
+  RecruiterPicker,
+  RecruiterSpecialtySelect,
+  SourceSelect,
+  useRecruiters,
+} from "@/components/recruiter-fields";
 
 const DIRECTION_LABEL: Record<EmailMessageDirection, string> = {
   inbound: "In",
@@ -140,6 +145,33 @@ export default function PersonRecordPage() {
     OperatorWarmthLevel | ""
   >("");
   const [inspectReload, setInspectReload] = useState(0);
+  const recruiters = useRecruiters(true);
+
+  useEffect(() => {
+    // #region agent log
+    const select = document.getElementById("leadTemp") as HTMLSelectElement | null;
+    fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "4bef3e",
+      },
+      body: JSON.stringify({
+        sessionId: "4bef3e",
+        runId: "second-contact",
+        hypothesisId: "A",
+        location: "people/[id]/page.tsx:operatorLevel-effect",
+        message: "operatorLevel state",
+        data: {
+          operatorLevel,
+          selectValue: select?.value ?? null,
+          inspectReload,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [inspectReload, operatorLevel]);
 
   const load = useCallback(async () => {
     const [personRes, userRes] = await Promise.all([
@@ -217,7 +249,7 @@ export default function PersonRecordPage() {
       }
       setSaveHint("Saved");
       window.setTimeout(() => setSaveHint(""), 1500);
-      if (body.programTrack !== undefined) {
+      if (body.programTrack !== undefined || body.contactKind !== undefined) {
         await load();
       }
     } catch (err) {
@@ -236,11 +268,11 @@ export default function PersonRecordPage() {
       },
       body: JSON.stringify({
         sessionId: "4bef3e",
-        runId: "post-fix",
+        runId: "second-contact",
         hypothesisId: "C",
         location: "people/[id]/page.tsx:setOperatorWarmth",
-        message: "setOperatorWarmth start",
-        data: { level },
+        message: "POST operator-temp start",
+        data: { level, personId: id },
         timestamp: Date.now(),
       }),
     }).catch(() => {});
@@ -263,21 +295,38 @@ export default function PersonRecordPage() {
         },
         body: JSON.stringify({
           sessionId: "4bef3e",
-          runId: "post-fix",
-          hypothesisId: "D",
+          runId: "second-contact",
+          hypothesisId: "C",
           location: "people/[id]/page.tsx:setOperatorWarmth",
-          message: "setOperatorWarmth success",
-          data: {
-            level,
-            selectValue:
-              (document.getElementById("leadTemp") as HTMLSelectElement | null)
-                ?.value ?? null,
-          },
+          message: "POST operator-temp success",
+          data: { level, personId: id },
           timestamp: Date.now(),
         }),
       }).catch(() => {});
       // #endregion
     } catch (err) {
+      // #region agent log
+      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "4bef3e",
+        },
+        body: JSON.stringify({
+          sessionId: "4bef3e",
+          runId: "second-contact",
+          hypothesisId: "C",
+          location: "people/[id]/page.tsx:setOperatorWarmth",
+          message: "POST operator-temp failed",
+          data: {
+            level,
+            personId: id,
+            error: err instanceof Error ? err.message : "unknown",
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setError(saveErrorMessage(err, "Failed to save judgment"));
     }
   }
@@ -391,6 +440,13 @@ export default function PersonRecordPage() {
   }
 
   const person = detail.person;
+  const isRecruiter = person.contactKind === "recruiter";
+  const sourceOptions: PersonSource[] = [
+    ...MANUAL_SOURCES.filter((value) =>
+      isRecruiter ? value !== "recruiter" : true,
+    ),
+    ...(person.source === "website" ? (["website"] as const) : []),
+  ];
   const name = `${person.firstName} ${person.lastName}`;
   const displayBucket =
     person.score === null ? null : displayScoreBucket(person.score);
@@ -403,12 +459,7 @@ export default function PersonRecordPage() {
           hysteresis: SCORE_FORMULA_V1.hysteresis,
         })
       : null;
-  const activityPayloads = timeline
-    .filter(
-      (item): item is Extract<TimelineItem, { kind: "activity" }> =>
-        item.kind === "activity",
-    )
-    .map((item) => item.activity.payload);
+  const activityPayloads = detail.taskGuidePayloads;
   const nowMs = Date.now();
   const openTasks = detail.tasks.filter((task) => {
     if (task.status !== "open") {
@@ -465,7 +516,12 @@ export default function PersonRecordPage() {
             Do not contact
           </p>
         ) : null}
-        {detail.campaignHold ? (
+        {isRecruiter ? (
+          <p className="rounded-md border px-3 py-2 text-sm">
+            Excluded from scoring and campaigns
+          </p>
+        ) : null}
+        {!isRecruiter && detail.campaignHold ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
             <p>Hot sequence waiting — no email until released</p>
             {user?.role === "admin" ? (
@@ -568,7 +624,46 @@ export default function PersonRecordPage() {
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">Source</dt>
-            <dd>{SOURCE_LABEL[person.source]}</dd>
+            <dd className="space-y-2">
+              <SourceSelect
+                id="person-source"
+                value={person.source}
+                sources={sourceOptions}
+                onChange={(value) => {
+                  const body: PersonPatch = { source: value };
+                  if (value !== "recruiter") {
+                    body.sourceRecruiterId = null;
+                  }
+                  void patch(body);
+                }}
+              />
+              {person.source === "recruiter" ? (
+                <RecruiterPicker
+                  id="person-source-recruiter"
+                  required
+                  value={person.sourceRecruiterId ?? ""}
+                  recruiters={recruiters}
+                  excludeId={person.id}
+                  onChange={(value) =>
+                    void patch({
+                      source: "recruiter",
+                      sourceRecruiterId: value || null,
+                    })
+                  }
+                />
+              ) : null}
+              {person.sourceRecruiter ? (
+                <Link
+                  href={`/people/${person.sourceRecruiter.id}`}
+                  className="block text-xs underline-offset-2 hover:underline"
+                >
+                  {personDisplayName(person.sourceRecruiter)}
+                  {person.sourceRecruiter.recruiterSpecialty
+                    ? ` · ${RECRUITER_SPECIALTY_LABELS[person.sourceRecruiter.recruiterSpecialty]}`
+                    : ""}
+                </Link>
+              ) : null}
+            </dd>
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">Resume</dt>
@@ -596,6 +691,7 @@ export default function PersonRecordPage() {
               />
             </dd>
           </div>
+          {!isRecruiter ? (
           <div>
             <dt className="text-xs text-muted-foreground">Score</dt>
             <dd>
@@ -616,7 +712,8 @@ export default function PersonRecordPage() {
               )}
             </dd>
           </div>
-          {scoreExplanation ? (
+          ) : null}
+          {scoreExplanation && !isRecruiter ? (
             <div className="sm:col-span-2">
               <p className="text-sm text-canary">{scoreExplanation}</p>
             </div>
@@ -631,6 +728,55 @@ export default function PersonRecordPage() {
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       <section className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+        <ContactKindSelect
+          id="person-kind"
+          value={person.contactKind}
+          onChange={(value: ContactKind) => {
+            if (value === "recruiter" && !person.recruiterSpecialty) {
+              setDetail((current) =>
+                current
+                  ? {
+                      ...current,
+                      person: {
+                        ...current.person,
+                        contactKind: "recruiter",
+                      },
+                    }
+                  : current,
+              );
+              return;
+            }
+            const body: PersonPatch = { contactKind: value };
+            if (value === "contact") {
+              body.recruiterSpecialty = null;
+            } else if (person.recruiterSpecialty) {
+              body.recruiterSpecialty = person.recruiterSpecialty;
+            }
+            if (value === "recruiter" && person.source === "recruiter") {
+              body.source = "other";
+              body.sourceRecruiterId = null;
+            }
+            void patch(body);
+          }}
+        />
+        {isRecruiter ? (
+          <RecruiterSpecialtySelect
+            id="person-specialty"
+            required
+            value={person.recruiterSpecialty ?? ""}
+            onChange={(value: RecruiterSpecialty) =>
+              void patch({
+                contactKind: "recruiter",
+                recruiterSpecialty: value,
+                ...(person.source === "recruiter"
+                  ? { source: "other", sourceRecruiterId: null }
+                  : {}),
+              })
+            }
+          />
+        ) : null}
+        {!isRecruiter ? (
+        <>
         <div className="space-y-1">
           <Label htmlFor="programTrack">Program they applied to</Label>
           <select
@@ -697,33 +843,32 @@ export default function PersonRecordPage() {
                 value={operatorLevel}
                 onChange={(event) => {
                   const value = event.target.value;
-                  // #region agent log
-                  fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      "X-Debug-Session-Id": "4bef3e",
-                    },
-                    body: JSON.stringify({
-                      sessionId: "4bef3e",
-                      runId: "post-fix",
-                      hypothesisId: "B",
-                      location: "people/[id]/page.tsx:judgment-change",
-                      message: "judgment select change",
-                      data: {
-                        value,
-                        emptyBailed: !value,
-                        optionCount: event.currentTarget.options.length,
-                      },
-                      timestamp: Date.now(),
-                    }),
-                  }).catch(() => {});
-                  // #endregion
                   if (!value) {
                     return;
                   }
                   const level = value as OperatorWarmthLevel;
                   setOperatorLevel(level);
+                  // #region agent log
+                  fetch(
+                    "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
+                    {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        "X-Debug-Session-Id": "4bef3e",
+                      },
+                      body: JSON.stringify({
+                        sessionId: "4bef3e",
+                        runId: "second-contact",
+                        hypothesisId: "A",
+                        location: "people/[id]/page.tsx:select.onChange",
+                        message: "operator select changed",
+                        data: { level, personId: id },
+                        timestamp: Date.now(),
+                      }),
+                    },
+                  ).catch(() => {});
+                  // #endregion
                   void setOperatorWarmth(level);
                 }}
               >
@@ -765,6 +910,8 @@ export default function PersonRecordPage() {
             ))}
           </select>
         </div>
+        </>
+        ) : null}
         <div className="flex items-center gap-2">
           <input
             id="doNotContact"
@@ -814,12 +961,35 @@ export default function PersonRecordPage() {
         </div>
       </section>
 
-      {user && canInspectScoring(user.role) ? (
+      {user && !isRecruiter && canInspectScoring(user.role) ? (
         <ScoreInspectPanel
           personId={id}
           reloadToken={inspectReload}
           onChanged={() => void load()}
-          onOperatorChange={(level) => setOperatorLevel(level ?? "")}
+          onOperatorChange={(level) => {
+            // #region agent log
+            fetch(
+              "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Debug-Session-Id": "4bef3e",
+                },
+                body: JSON.stringify({
+                  sessionId: "4bef3e",
+                  runId: "second-contact",
+                  hypothesisId: "A",
+                  location: "people/[id]/page.tsx:onOperatorChange",
+                  message: "inspect synced operatorLevel",
+                  data: { level, next: level ?? "" },
+                  timestamp: Date.now(),
+                }),
+              },
+            ).catch(() => {});
+            // #endregion
+            setOperatorLevel(level ?? "");
+          }}
         />
       ) : null}
 
@@ -827,8 +997,7 @@ export default function PersonRecordPage() {
         <h2 className="text-sm font-medium">Tasks</h2>
         <p className="text-xs text-muted-foreground">
           Both operators see every task on this contact. Home stays mine-only.
-          Type, due date, and notes stay editable after save. Each change
-          is recorded on the timeline.
+          Type, due date, and notes stay editable after save.
           I finished this closes the task and logs it on the timeline.
           If a follow-up is already open, closing this leaves it.
           {saveHint ? ` · ${saveHint}` : ""}
@@ -1125,10 +1294,11 @@ export default function PersonRecordPage() {
       <section className="space-y-2">
         <h2 className="text-sm font-medium">Timeline</h2>
         <p className="text-xs text-muted-foreground">
-          j/k to move, enter to expand email, esc to collapse.
+          Emails, notes, meetings, and logged contact. Field edits stay in
+          audit. j/k to move, enter to expand email, esc to collapse.
         </p>
         {timeline.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No activity yet.</p>
+          <p className="text-sm text-muted-foreground">No contact yet.</p>
         ) : (
           <ol className="divide-y rounded-lg border">
             {timeline.map((item, index) => (
@@ -1174,8 +1344,7 @@ function TaskEditFields({
   return (
     <div className="space-y-2 rounded-md border bg-muted/30 p-2">
       <p className="text-xs text-muted-foreground">
-        Fix type, due date, or notes. The timeline keeps a record of the
-        change.
+        Fix type, due date, or notes.
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="space-y-1">

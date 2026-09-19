@@ -10,6 +10,7 @@ const existing = {
   deleted: false,
   hasAllocationCard: false,
   hasIncubatorCard: false,
+  contactKind: "contact" as const,
 };
 
 describe("planManualApplicant allocation", () => {
@@ -163,5 +164,43 @@ describe("planManualApplicant shared rules", () => {
         existing: { ...existing, doNotContact: true },
       }),
     ).toMatchObject({ ok: false, code: "DO_NOT_CONTACT" });
+  });
+
+  it("blocks turning a recruiter into an applicant", () => {
+    expect(
+      planManualApplicant({
+        programTrack: "recruitment",
+        name: "Ada Lovelace",
+        existing: { ...existing, contactKind: "recruiter" },
+      }),
+    ).toMatchObject({ ok: false, status: 409, code: "PERSON_IS_RECRUITER" });
+  });
+
+  it("requires a recruiter id when source is recruiter", () => {
+    expect(
+      createApplicantPersonBodySchema.safeParse({
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        programTrack: "allocation",
+        source: "recruiter",
+        firstTask: {
+          kind: "email",
+          dueAt: "2026-09-02T00:00:00.000Z",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      createApplicantPersonBodySchema.safeParse({
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        programTrack: "allocation",
+        source: "recruiter",
+        sourceRecruiterId: existing.id,
+        firstTask: {
+          kind: "email",
+          dueAt: "2026-09-02T00:00:00.000Z",
+        },
+      }).success,
+    ).toBe(true);
   });
 });

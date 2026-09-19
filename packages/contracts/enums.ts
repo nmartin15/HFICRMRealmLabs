@@ -9,8 +9,37 @@ export const personSourceSchema = z.enum([
   "referral",
   "other",
   "website",
+  "recruiter",
 ]);
 export type PersonSource = z.infer<typeof personSourceSchema>;
+
+export const PERSON_SOURCE_LABELS: Record<PersonSource, string> = {
+  linkedin: "LinkedIn",
+  workable: "Workable",
+  referral: "Referral",
+  other: "Other",
+  website: "Website",
+  recruiter: "Recruiter",
+};
+
+export const contactKindSchema = z.enum(["contact", "recruiter"]);
+export type ContactKind = z.infer<typeof contactKindSchema>;
+
+export const CONTACT_KIND_LABELS: Record<ContactKind, string> = {
+  contact: "Contact",
+  recruiter: "Recruiter",
+};
+
+export const recruiterSpecialtySchema = z.enum([
+  "quant_analyst",
+  "quant_developer",
+]);
+export type RecruiterSpecialty = z.infer<typeof recruiterSpecialtySchema>;
+
+export const RECRUITER_SPECIALTY_LABELS: Record<RecruiterSpecialty, string> = {
+  quant_analyst: "Quant Analyst Recruiter",
+  quant_developer: "Quant Developer Recruiter",
+};
 
 export const programTrackSchema = z.enum([
   "allocation",

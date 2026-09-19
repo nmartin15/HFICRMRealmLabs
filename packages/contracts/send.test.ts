@@ -29,6 +29,23 @@ describe("outbound send gate", () => {
     });
   });
 
+  it("blocks campaign mail to recruiter contacts", () => {
+    expect(
+      planOutboundSend({
+        suppressionReason: null,
+        purpose: "sales",
+        stayInTouch: false,
+        doNotContact: false,
+        newsletterGranted: true,
+        contactKind: "recruiter",
+      }),
+    ).toEqual({
+      ok: false,
+      code: SEND_BLOCKED_CODE,
+      message: "Recruiters are not campaign recipients",
+    });
+  });
+
   it("blocks sales to rejected-but-interested and allows newsletter with consent", () => {
     expect(
       planOutboundSend({

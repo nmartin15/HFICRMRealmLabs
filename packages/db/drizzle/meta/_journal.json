@@ -127,6 +127,20 @@
       "when": 1790200000000,
       "tag": "0017_signal_source_cascade",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790300000000,
+      "tag": "0018_recruiter_contacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790300001000,
+      "tag": "0019_recruiter_contacts",
+      "breakpoints": true
     }
   ]
 }

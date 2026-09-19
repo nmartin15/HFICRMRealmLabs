@@ -7,6 +7,8 @@ import type {
   IncubatorCard,
   Meeting,
   Person,
+  RecruiterSpecialty,
+  SourceRecruiter,
   Task,
   User,
 } from "@realm-labs/contracts";
@@ -63,7 +65,31 @@ function serializeResumeUrl(value: string | null): string | null {
   }
 }
 
-export function serializePerson(row: PersonRow): Person {
+export type SourceRecruiterRow = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  recruiterSpecialty: RecruiterSpecialty | null;
+};
+
+export function serializeSourceRecruiter(
+  row: SourceRecruiterRow | null | undefined,
+): SourceRecruiter | null {
+  if (!row || !row.recruiterSpecialty) {
+    return null;
+  }
+  return {
+    id: row.id,
+    firstName: row.firstName,
+    lastName: row.lastName,
+    recruiterSpecialty: row.recruiterSpecialty,
+  };
+}
+
+export function serializePerson(
+  row: PersonRow,
+  sourceRecruiter: SourceRecruiterRow | null = null,
+): Person {
   return {
     id: row.id,
     firstName: row.firstName,
@@ -85,6 +111,10 @@ export function serializePerson(row: PersonRow): Person {
     score: row.score,
     doNotContact: row.doNotContact,
     needsReview: row.needsReview,
+    contactKind: row.contactKind,
+    recruiterSpecialty: row.recruiterSpecialty,
+    sourceRecruiterId: row.sourceRecruiterId,
+    sourceRecruiter: serializeSourceRecruiter(sourceRecruiter),
     ownerId: row.ownerId,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),

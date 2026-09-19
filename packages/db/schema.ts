@@ -12,6 +12,7 @@ import {
   index,
   uniqueIndex,
   uuid,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 
 const timestamps = {
@@ -31,6 +32,12 @@ export const personSourceEnum = pgEnum("person_source", [
   "referral",
   "other",
   "website",
+  "recruiter",
+]);
+export const contactKindEnum = pgEnum("contact_kind", ["contact", "recruiter"]);
+export const recruiterSpecialtyEnum = pgEnum("recruiter_specialty", [
+  "quant_analyst",
+  "quant_developer",
 ]);
 export const programTrackEnum = pgEnum("program_track", [
   "allocation",
@@ -220,16 +227,38 @@ export const people = pgTable(
       withTimezone: true,
       mode: "date",
     }),
+    contactKind: contactKindEnum("contact_kind").notNull().default("contact"),
+    recruiterSpecialty: recruiterSpecialtyEnum("recruiter_specialty"),
+    sourceRecruiterId: uuid("source_recruiter_id"),
     ownerId: uuid("owner_id").references(() => users.id),
     ...timestamps,
     deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
     uniqueIndex("people_email_unique").on(table.email),
+    index("people_source_recruiter_id_idx").on(table.sourceRecruiterId),
+    index("people_contact_kind_idx").on(table.contactKind),
+    foreignKey({
+      name: "people_source_recruiter_id_people_id_fk",
+      columns: [table.sourceRecruiterId],
+      foreignColumns: [table.id],
+    }),
     check("people_email_lowercase", sql`${table.email} = lower(${table.email})`),
     check(
       "people_score_range",
       sql`${table.score} is null or (${table.score} >= 0 and ${table.score} <= 100)`,
+    ),
+    check(
+      "people_recruiter_specialty",
+      sql`(${table.contactKind} = 'contact' and ${table.recruiterSpecialty} is null) or (${table.contactKind} = 'recruiter' and ${table.recruiterSpecialty} is not null)`,
+    ),
+    check(
+      "people_source_recruiter",
+      sql`(${table.source} = 'recruiter' and ${table.sourceRecruiterId} is not null) or (${table.source} <> 'recruiter' and ${table.sourceRecruiterId} is null)`,
+    ),
+    check(
+      "people_recruiter_not_sourced_from_recruiter",
+      sql`${table.contactKind} <> 'recruiter' or ${table.source} <> 'recruiter'`,
     ),
   ],
 );
@@ -742,6 +771,12 @@ export const peopleRelations = relations(people, ({ one, many }) => ({
     fields: [people.ownerId],
     references: [users.id],
   }),
+  sourceRecruiter: one(people, {
+    fields: [people.sourceRecruiterId],
+    references: [people.id],
+    relationName: "sourceRecruiter",
+  }),
+  sourcedPeople: many(people, { relationName: "sourceRecruiter" }),
   allocationCard: one(allocationCards, {
     fields: [people.id],
     references: [allocationCards.personId],

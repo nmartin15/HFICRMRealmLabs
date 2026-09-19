@@ -5,23 +5,52 @@ import {
   personSourceSchema,
   programTrackSchema,
   uuidSchema,
+  type ContactKind,
   type IncubatorStage,
   type ProgramTrack,
 } from "./enums";
 import { splitName } from "./import";
 import { createTaskBodySchema } from "./tasks";
+import { planRecruiterSource } from "./people";
 
-export const createApplicantPersonBodySchema = z.object({
+const createApplicantPersonFields = z.object({
   name: z.string().trim().min(1),
   email: emailInputSchema,
   title: z.string().trim().min(1).optional(),
   company: z.string().trim().min(1).optional(),
   location: z.string().trim().min(1).optional(),
   source: personSourceSchema.default("other"),
+  sourceRecruiterId: uuidSchema.optional(),
   programTrack: programTrackSchema,
   appliedAt: isoDateSchema.optional(),
   firstTask: createTaskBodySchema,
 });
+
+function refineApplicantRecruiterSource<
+  T extends z.ZodType<{
+    source: z.infer<typeof personSourceSchema>;
+    sourceRecruiterId?: string;
+  }>,
+>(schema: T) {
+  return schema.superRefine((data, ctx) => {
+    const source = planRecruiterSource({
+      source: data.source,
+      sourceRecruiterId: data.sourceRecruiterId,
+      personId: null,
+    });
+    if (!source.ok) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sourceRecruiterId"],
+        message: source.message,
+      });
+    }
+  });
+}
+
+export const createApplicantPersonBodySchema = refineApplicantRecruiterSource(
+  createApplicantPersonFields,
+);
 export type CreateApplicantPersonBody = z.infer<
   typeof createApplicantPersonBodySchema
 >;
@@ -33,9 +62,11 @@ export type CreateAllocationApplicantBody = z.infer<
 >;
 
 export const createIncubatorApplicantBodySchema =
-  createApplicantPersonBodySchema.extend({
-    applicationRef: z.string().trim().min(1).optional(),
-  });
+  refineApplicantRecruiterSource(
+    createApplicantPersonFields.extend({
+      applicationRef: z.string().trim().min(1).optional(),
+    }),
+  );
 export type CreateIncubatorApplicantBody = z.infer<
   typeof createIncubatorApplicantBodySchema
 >;
@@ -57,6 +88,7 @@ export type PlanManualApplicantExisting = {
   deleted: boolean;
   hasAllocationCard: boolean;
   hasIncubatorCard: boolean;
+  contactKind: ContactKind;
 };
 
 export type PlanManualApplicantInput = {
@@ -115,6 +147,14 @@ export function planManualApplicant(
       409,
       "DO_NOT_CONTACT",
       "Person is marked do not contact",
+    );
+  }
+
+  if (input.existing?.contactKind === "recruiter") {
+    return fail(
+      409,
+      "PERSON_IS_RECRUITER",
+      "Person is a recruiter and cannot be added as an applicant",
     );
   }
 

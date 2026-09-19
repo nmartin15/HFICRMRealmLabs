@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPersonBodySchema, planManualContact } from "./people";
+import { createPersonBodySchema, planContactKindChange, planManualContact, planRecruiterSource } from "./people";
 
 const existing = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -117,5 +117,146 @@ describe("createPersonBodySchema", () => {
         email: "ada@example.com",
       }).success,
     ).toBe(false);
+  });
+
+  it("defaults new people to contact kind", () => {
+    const parsed = createPersonBodySchema.safeParse({
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.contactKind).toBe("contact");
+    }
+  });
+
+  it("requires specialty for recruiter contacts", () => {
+    expect(
+      createPersonBodySchema.safeParse({
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        contactKind: "recruiter",
+      }).success,
+    ).toBe(false);
+    expect(
+      createPersonBodySchema.safeParse({
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        contactKind: "recruiter",
+        recruiterSpecialty: "quant_analyst",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("requires a recruiter id when source is recruiter", () => {
+    expect(
+      createPersonBodySchema.safeParse({
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        source: "recruiter",
+      }).success,
+    ).toBe(false);
+    expect(
+      createPersonBodySchema.safeParse({
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        source: "recruiter",
+        sourceRecruiterId: existing.id,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a recruiter sourced from another recruiter", () => {
+    expect(
+      createPersonBodySchema.safeParse({
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        contactKind: "recruiter",
+        recruiterSpecialty: "quant_developer",
+        source: "recruiter",
+        sourceRecruiterId: existing.id,
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("planContactKindChange", () => {
+  it("requires specialty and a clear board for recruiters", () => {
+    expect(
+      planContactKindChange({
+        contactKind: "recruiter",
+        recruiterSpecialty: "quant_analyst",
+        programTrack: null,
+        hasBoardCard: false,
+        source: "linkedin",
+      }),
+    ).toEqual({
+      ok: true,
+      contactKind: "recruiter",
+      recruiterSpecialty: "quant_analyst",
+    });
+    expect(
+      planContactKindChange({
+        contactKind: "recruiter",
+        recruiterSpecialty: "quant_analyst",
+        programTrack: "allocation",
+        hasBoardCard: false,
+        source: "linkedin",
+      }),
+    ).toMatchObject({ ok: false, status: 409, code: "RECRUITER_HAS_TRACK" });
+    expect(
+      planContactKindChange({
+        contactKind: "recruiter",
+        recruiterSpecialty: "quant_analyst",
+        programTrack: null,
+        hasBoardCard: true,
+        source: "linkedin",
+      }),
+    ).toMatchObject({ ok: false, status: 409, code: "RECRUITER_ON_BOARD" });
+  });
+});
+
+describe("planRecruiterSource", () => {
+  it("requires a live recruiter contact", () => {
+    expect(
+      planRecruiterSource({
+        source: "recruiter",
+        sourceRecruiterId: existing.id,
+        personId: null,
+        target: {
+          id: existing.id,
+          contactKind: "recruiter",
+          deleted: false,
+        },
+      }),
+    ).toEqual({
+      ok: true,
+      source: "recruiter",
+      sourceRecruiterId: existing.id,
+    });
+    expect(
+      planRecruiterSource({
+        source: "recruiter",
+        sourceRecruiterId: existing.id,
+        personId: null,
+        target: {
+          id: existing.id,
+          contactKind: "contact",
+          deleted: false,
+        },
+      }),
+    ).toMatchObject({ ok: false, code: "NOT_A_RECRUITER" });
+    expect(
+      planRecruiterSource({
+        source: "recruiter",
+        sourceRecruiterId: existing.id,
+        personId: existing.id,
+        target: {
+          id: existing.id,
+          contactKind: "recruiter",
+          deleted: false,
+        },
+      }),
+    ).toMatchObject({ ok: false, code: "RECRUITER_SELF" });
   });
 });

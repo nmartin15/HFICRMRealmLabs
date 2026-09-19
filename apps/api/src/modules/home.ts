@@ -4,7 +4,6 @@ import {
   canViewCard,
   canViewMeeting,
   canViewOperatorTask,
-  completedTaskIdFromPayload,
   emailThreadSchema,
   homeCounts,
   homeSnapshotResponseSchema,
@@ -13,7 +12,6 @@ import {
   isWithinUtcBounds,
   latestHandSetMeetingDueAt,
   meetingDigestPersonSchema,
-  meetingTaskNeedsOutcome,
   operatorTasksQuerySchema,
   todayBoundsUtc,
   zonedIsoDate,
@@ -27,7 +25,6 @@ import {
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import {
-  activities,
   allocationCards,
   emailThreads,
   incubatorCards,
@@ -203,10 +200,15 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           .from(people)
           .leftJoin(incubatorCards, eq(incubatorCards.personId, people.id))
           .where(
-            and(listed, isNull(people.programTrack), or(
-              isNull(incubatorCards.stage),
-              ne(incubatorCards.stage, "rejected"),
-            )),
+            and(
+              listed,
+              eq(people.contactKind, "contact"),
+              isNull(people.programTrack),
+              or(
+                isNull(incubatorCards.stage),
+                ne(incubatorCards.stage, "rejected"),
+              ),
+            ),
           )
           .orderBy(asc(people.lastName), asc(people.firstName)),
         app.db
@@ -219,7 +221,11 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           .from(personCampaignTags)
           .innerJoin(people, eq(personCampaignTags.personId, people.id))
           .where(
-            and(listed, eq(personCampaignTags.sequenceAction, "pending_review")),
+            and(
+              listed,
+              eq(people.contactKind, "contact"),
+              eq(personCampaignTags.sequenceAction, "pending_review"),
+            ),
           )
           .orderBy(asc(people.lastName), asc(people.firstName)),
         loadHomeDeliverability(app.db, now),
@@ -294,7 +300,6 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         }
       }
 
-      const leftoverCountBeforeSupersede = leftoverMeetings.length;
       leftoverMeetings = leftoverMeetings.filter(
         (item) =>
           !isOpenMeetingSupersededByLaterOutcome({
@@ -307,224 +312,6 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
       const todayMeetings: HomeScheduleItem[] = todayMeetingRows
         .filter((row) => visibleTask(row.task.createdBy))
         .map(toScheduleItem);
-
-      // #region agent log
-      {
-        const leftoverByPerson = new Map<
-          string,
-          { matchReported: boolean; items: HomeScheduleItem[] }
-        >();
-        for (const item of leftoverMeetings) {
-          const current = leftoverByPerson.get(item.person.id);
-          const matchReported =
-            item.person.lastName.trim().toLowerCase() === "allen" &&
-            item.person.firstName.trim().toLowerCase().includes("gregory");
-          if (current) {
-            current.items.push(item);
-          } else {
-            leftoverByPerson.set(item.person.id, {
-              matchReported,
-              items: [item],
-            });
-          }
-        }
-        let topId: string | null = null;
-        let topCount = 0;
-        let reportedMatch = false;
-        let reportedCount = 0;
-        for (const [id, bucket] of leftoverByPerson) {
-          if (bucket.matchReported) {
-            reportedMatch = true;
-            reportedCount = bucket.items.length;
-            topId = id;
-            topCount = bucket.items.length;
-            break;
-          }
-          if (bucket.items.length > topCount) {
-            topCount = bucket.items.length;
-            topId = id;
-          }
-        }
-        if (!reportedMatch) {
-          topId = null;
-          topCount = 0;
-          for (const [id, bucket] of leftoverByPerson) {
-            if (bucket.items.length > topCount) {
-              topCount = bucket.items.length;
-              topId = id;
-            }
-          }
-        }
-        const topItems = topId
-          ? leftoverByPerson.get(topId)?.items ?? []
-          : [];
-        const uniqueDays = new Set(
-          topItems.map((item) => zonedIsoDate(new Date(item.task.dueAt))),
-        );
-        const calIds = new Set(
-          topItems.flatMap((item) =>
-            item.task.calendarEventId ? [item.task.calendarEventId] : [],
-          ),
-        );
-        const outcomes: Record<string, number> = {};
-        let needsReviewCount = 0;
-        let missingCalId = 0;
-        let nonScheduledOutcome = 0;
-        for (const item of topItems) {
-          const key = item.task.outcome ?? "null";
-          outcomes[key] = (outcomes[key] ?? 0) + 1;
-          if (item.task.needsReview) {
-            needsReviewCount += 1;
-          }
-          if (!item.task.calendarEventId) {
-            missingCalId += 1;
-          }
-          if (item.task.outcome && item.task.outcome !== "scheduled") {
-            nonScheduledOutcome += 1;
-          }
-        }
-        fetch(
-          "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Debug-Session-Id": "78acd3",
-            },
-            body: JSON.stringify({
-              sessionId: "78acd3",
-              runId: "post-fix",
-              hypothesisId: "B",
-              location: "apps/api/src/modules/home.ts:leftoverMeetings",
-              message: "home leftover summary",
-              data: {
-                leftoverCountBeforeSupersede,
-                leftoverCount: leftoverMeetings.length,
-                uniquePeople: leftoverByPerson.size,
-                reportedMatch,
-                reportedCount,
-                topCount,
-                topUniqueDays: uniqueDays.size,
-                topUniqueCalIds: calIds.size,
-                topMissingCalId: missingCalId,
-                topNeedsReview: needsReviewCount,
-                topNonScheduledOutcome: nonScheduledOutcome,
-                topOutcomes: outcomes,
-                todayCloseCount: todayMeetings.filter((item) =>
-                  meetingTaskNeedsOutcome(
-                    item.task.dueAt,
-                    item.task.status,
-                    now,
-                    item.task.needsReview,
-                  ),
-                ).length,
-              },
-              timestamp: Date.now(),
-            }),
-          },
-        ).catch(() => {});
-        if (topId) {
-          const closedMeetings = await app.db
-            .select({
-              status: tasks.status,
-              outcome: tasks.outcome,
-              needsReview: tasks.needsReview,
-            })
-            .from(tasks)
-            .where(
-              and(
-                eq(tasks.personId, topId),
-                eq(tasks.kind, "meeting"),
-                ne(tasks.status, "open"),
-              ),
-            );
-          const personActivities = await app.db
-            .select({ payload: activities.payload })
-            .from(activities)
-            .where(eq(activities.personId, topId));
-          const leftoverIds = new Set(topItems.map((item) => item.task.id));
-          const whatCounts: Record<string, number> = {};
-          let leftoverIdsOnCompleteTimeline = 0;
-          for (const row of personActivities) {
-            const what =
-              typeof row.payload.what === "string" ? row.payload.what : "";
-            if (
-              what === "meeting.outcome" ||
-              what === "task.complete" ||
-              what === "meeting.scheduled"
-            ) {
-              whatCounts[what] = (whatCounts[what] ?? 0) + 1;
-            }
-            const completedId = completedTaskIdFromPayload(row.payload);
-            if (completedId && leftoverIds.has(completedId)) {
-              leftoverIdsOnCompleteTimeline += 1;
-            }
-          }
-          const closedStatus: Record<string, number> = {};
-          const closedOutcome: Record<string, number> = {};
-          for (const row of closedMeetings) {
-            closedStatus[row.status] = (closedStatus[row.status] ?? 0) + 1;
-            const key = row.outcome ?? "null";
-            closedOutcome[key] = (closedOutcome[key] ?? 0) + 1;
-          }
-          fetch(
-            "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Debug-Session-Id": "78acd3",
-              },
-              body: JSON.stringify({
-                sessionId: "78acd3",
-                  runId: "post-fix",
-                hypothesisId: "A",
-                location: "apps/api/src/modules/home.ts:topLeftoverPerson",
-                message: "top leftover person closed tasks vs timeline",
-                data: {
-                  reportedMatch,
-                  leftoverOpenCount: topItems.length,
-                  leftoverIdsOnCompleteTimeline,
-                  closedMeetingCount: closedMeetings.length,
-                  closedStatus,
-                  closedOutcome,
-                  whatCounts,
-                },
-                timestamp: Date.now(),
-              }),
-            },
-          ).catch(() => {});
-          fetch(
-            "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Debug-Session-Id": "78acd3",
-              },
-              body: JSON.stringify({
-                sessionId: "78acd3",
-                  runId: "post-fix",
-                hypothesisId: "C",
-                location: "apps/api/src/modules/home.ts:topLeftoverSample",
-                message: "top leftover sample tasks",
-                data: {
-                  reportedMatch,
-                  sample: topItems.slice(0, 6).map((item) => ({
-                    dueAt: item.task.dueAt,
-                    status: item.task.status,
-                    outcome: item.task.outcome,
-                    needsReview: item.task.needsReview,
-                    hasCalId: Boolean(item.task.calendarEventId),
-                  })),
-                },
-                timestamp: Date.now(),
-              }),
-            },
-          ).catch(() => {});
-        }
-      }
-      // #endregion
 
       const skipCallPersonIds = new Set<string>();
       for (const meeting of upcomingMeetingRows) {

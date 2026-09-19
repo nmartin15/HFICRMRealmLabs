@@ -4,7 +4,7 @@ import {
   isEligibleForSalesCampaign,
   SUPPRESSION_POLICIES,
 } from "./suppression";
-import type { SuppressionReason } from "./enums";
+import type { ContactKind, SuppressionReason } from "./enums";
 import type { CampaignSendPurpose } from "./campaign";
 import { DISPLAY_TIME_ZONE, zonedLocalToUtc, zonedYmd } from "./time";
 
@@ -37,6 +37,7 @@ export type PlanOutboundSendInput = {
   newsletterGranted: boolean;
   emailUndeliverable?: boolean;
   isSeed?: boolean;
+  contactKind?: ContactKind;
 };
 
 export type PlanOutboundSendResult =
@@ -54,6 +55,13 @@ export function isCampaignFromAddress(email: string): boolean {
 export function planOutboundSend(
   input: PlanOutboundSendInput,
 ): PlanOutboundSendResult {
+  if (input.contactKind === "recruiter") {
+    return {
+      ok: false,
+      code: SEND_BLOCKED_CODE,
+      message: "Recruiters are not campaign recipients",
+    };
+  }
   if (input.doNotContact) {
     return {
       ok: false,

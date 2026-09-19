@@ -134,6 +134,21 @@ describe("campaign tags", () => {
     ).toBeNull();
   });
 
+  it("gives recruiter contacts no tag, including newsletter", () => {
+    expect(
+      resolveCampaignTag({
+        bucket: "hot",
+        programTrack: "allocation",
+        stage: "contacted",
+        suppressionReason: null,
+        stayInTouch: false,
+        doNotContact: false,
+        newsletterGranted: true,
+        contactKind: "recruiter",
+      }),
+    ).toBeNull();
+  });
+
   it("limits rejected-but-interested contacts to newsletter when consented", () => {
     expect(
       resolveCampaignTag({

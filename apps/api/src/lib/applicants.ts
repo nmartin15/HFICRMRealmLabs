@@ -1,6 +1,7 @@
 import {
   planCreateTask,
   planManualApplicant,
+  planRecruiterSource,
   todayIsoInDisplayZone,
   type ApplicantPipeline,
   type CreateApplicantPersonBody,
@@ -19,6 +20,7 @@ import {
 import type { AuthedUser } from "../plugins/auth.js";
 import { httpError } from "../plugins/error.js";
 import { writeActivity } from "./activity.js";
+import { loadSourceRecruiterTarget } from "./recruiters.js";
 import { suppressionReasonForEmail, writeSuppression } from "./suppression.js";
 
 type ApplicantBody = CreateApplicantPersonBody & {
@@ -64,6 +66,7 @@ export async function createManualApplicant(
       deleted: Boolean(existingPerson.deletedAt),
       hasAllocationCard: Boolean(allocRows[0]),
       hasIncubatorCard: Boolean(incubRows[0]),
+      contactKind: existingPerson.contactKind,
     };
   }
 
@@ -78,6 +81,16 @@ export async function createManualApplicant(
   });
   if (!plan.ok) {
     throw httpError(plan.status, plan.code, plan.message);
+  }
+
+  const sourcePlan = planRecruiterSource({
+    source: body.source,
+    sourceRecruiterId: body.sourceRecruiterId,
+    personId: plan.reusePersonId,
+    target: await loadSourceRecruiterTarget(db, body.sourceRecruiterId),
+  });
+  if (!sourcePlan.ok) {
+    throw httpError(sourcePlan.status, sourcePlan.code, sourcePlan.message);
   }
 
   const when = new Date();
@@ -107,7 +120,8 @@ export async function createManualApplicant(
           title: nullable(body.title),
           company: nullable(body.company),
           location: nullable(body.location),
-          source: body.source,
+          source: sourcePlan.source,
+          sourceRecruiterId: sourcePlan.sourceRecruiterId,
           appliedAt,
           programTrack: body.programTrack,
         })
@@ -126,7 +140,12 @@ export async function createManualApplicant(
           what: "person.create",
           when: when.toISOString(),
           before: null,
-          after: { programTrack: body.programTrack, email },
+          after: {
+            programTrack: body.programTrack,
+            email,
+            source: sourcePlan.source,
+            sourceRecruiterId: sourcePlan.sourceRecruiterId,
+          },
         },
       });
     }
@@ -184,11 +203,28 @@ export async function createManualApplicant(
       });
     }
 
-    if (plan.reusePersonId && existingPerson && existingPerson.programTrack !== body.programTrack) {
-      await tx
-        .update(people)
-        .set({ programTrack: body.programTrack })
-        .where(eq(people.id, personId));
+    if (plan.reusePersonId && existingPerson) {
+      const reuseUpdate: {
+        programTrack?: typeof body.programTrack;
+        source?: typeof sourcePlan.source;
+        sourceRecruiterId?: typeof sourcePlan.sourceRecruiterId;
+      } = {};
+      if (existingPerson.programTrack !== body.programTrack) {
+        reuseUpdate.programTrack = body.programTrack;
+      }
+      if (
+        existingPerson.source !== sourcePlan.source ||
+        existingPerson.sourceRecruiterId !== sourcePlan.sourceRecruiterId
+      ) {
+        reuseUpdate.source = sourcePlan.source;
+        reuseUpdate.sourceRecruiterId = sourcePlan.sourceRecruiterId;
+      }
+      if (Object.keys(reuseUpdate).length > 0) {
+        await tx
+          .update(people)
+          .set(reuseUpdate)
+          .where(eq(people.id, personId));
+      }
     }
 
     const personDoNotContact = Boolean(existingPerson?.doNotContact);

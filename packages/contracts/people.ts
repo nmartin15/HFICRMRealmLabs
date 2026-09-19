@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { activitySchema } from "./activities";
+import { activityPayloadSchema, activitySchema } from "./activities";
 import {
   CAPITAL_RAISING_BOARD_HREF,
   INCUBATOR_BOARD_HREF,
@@ -9,6 +9,7 @@ import {
 import {
   allocationStageSchema,
   budgetQualifiedSchema,
+  contactKindSchema,
   emailInputSchema,
   emailSchema,
   incubatorStageSchema,
@@ -19,12 +20,25 @@ import {
   personSourceSchema,
   programInterestSchema,
   programTrackSchema,
+  recruiterSpecialtySchema,
   uuidSchema,
+  type ContactKind,
+  type PersonSource,
+  type ProgramTrack,
+  type RecruiterSpecialty,
 } from "./enums";
 import { splitName } from "./import";
 import { personScoreSchema } from "./scoring";
 import { createTaskBodySchema, taskSchema } from "./tasks";
 import { timelineItemSchema } from "./timeline";
+
+export const sourceRecruiterSchema = z.object({
+  id: uuidSchema,
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  recruiterSpecialty: recruiterSpecialtySchema,
+});
+export type SourceRecruiter = z.infer<typeof sourceRecruiterSchema>;
 
 export const personSchema = z.object({
   id: uuidSchema,
@@ -47,12 +61,21 @@ export const personSchema = z.object({
   score: personScoreSchema.nullable(),
   doNotContact: z.boolean(),
   needsReview: z.boolean(),
+  contactKind: contactKindSchema,
+  recruiterSpecialty: recruiterSpecialtySchema.nullable(),
+  sourceRecruiterId: uuidSchema.nullable(),
+  sourceRecruiter: sourceRecruiterSchema.nullable(),
   ownerId: uuidSchema.nullable(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
   deletedAt: isoDateTimeSchema.nullable(),
 });
 export type Person = z.infer<typeof personSchema>;
+
+export const personListQuerySchema = z.object({
+  contactKind: contactKindSchema.optional(),
+});
+export type PersonListQuery = z.infer<typeof personListQuerySchema>;
 
 export const personListResponseSchema = z.object({
   data: z.array(personSchema),
@@ -76,6 +99,10 @@ export const personPatchSchema = z.object({
   firstName: z.string().trim().min(1).optional(),
   lastName: z.string().trim().min(1).optional(),
   needsReview: z.boolean().optional(),
+  contactKind: contactKindSchema.optional(),
+  recruiterSpecialty: recruiterSpecialtySchema.nullable().optional(),
+  source: personSourceSchema.optional(),
+  sourceRecruiterId: uuidSchema.nullable().optional(),
 });
 export type PersonPatch = z.infer<typeof personPatchSchema>;
 
@@ -88,24 +115,6 @@ export const createPersonNoteBodySchema = z.object({
   text: z.string().trim().min(1),
 });
 export type CreatePersonNoteBody = z.infer<typeof createPersonNoteBodySchema>;
-
-export const createPersonBodySchema = z.object({
-  name: z.string().trim().min(1),
-  email: emailInputSchema,
-  title: z.string().trim().min(1).optional(),
-  company: z.string().trim().min(1).optional(),
-  location: z.string().trim().min(1).optional(),
-  source: personSourceSchema.default("other"),
-  notes: z.string().trim().min(1).optional(),
-  firstTask: createTaskBodySchema.optional(),
-});
-export type CreatePersonBody = z.infer<typeof createPersonBodySchema>;
-
-export const createPersonResponseSchema = z.object({
-  personId: uuidSchema,
-  reusedPerson: z.boolean(),
-});
-export type CreatePersonResponse = z.infer<typeof createPersonResponseSchema>;
 
 export type PlanManualContactExisting = {
   id: string;
@@ -179,6 +188,193 @@ export function planManualContact(input: {
   };
 }
 
+export type PlanContactKindSuccess = {
+  ok: true;
+  contactKind: ContactKind;
+  recruiterSpecialty: RecruiterSpecialty | null;
+};
+
+export type PlanContactKindResult =
+  | PlanContactKindSuccess
+  | PlanManualContactError;
+
+export function planContactKindChange(input: {
+  contactKind: ContactKind;
+  recruiterSpecialty: RecruiterSpecialty | null | undefined;
+  programTrack: ProgramTrack | null;
+  hasBoardCard: boolean;
+  source: PersonSource;
+}): PlanContactKindResult {
+  if (input.contactKind === "recruiter") {
+    if (!input.recruiterSpecialty) {
+      return failContact(
+        400,
+        "SPECIALTY_REQUIRED",
+        "Recruiter specialty is required",
+      );
+    }
+    if (input.programTrack) {
+      return failContact(
+        409,
+        "RECRUITER_HAS_TRACK",
+        "Recruiters cannot have a program track",
+      );
+    }
+    if (input.hasBoardCard) {
+      return failContact(
+        409,
+        "RECRUITER_ON_BOARD",
+        "Recruiters cannot be on a pipeline board",
+      );
+    }
+    if (input.source === "recruiter") {
+      return failContact(
+        400,
+        "RECRUITER_NESTED_SOURCE",
+        "A recruiter cannot be sourced from another recruiter",
+      );
+    }
+    return {
+      ok: true,
+      contactKind: "recruiter",
+      recruiterSpecialty: input.recruiterSpecialty,
+    };
+  }
+  if (input.recruiterSpecialty) {
+    return failContact(
+      400,
+      "SPECIALTY_CONTACT_ONLY",
+      "Specialty is only for recruiter contacts",
+    );
+  }
+  return { ok: true, contactKind: "contact", recruiterSpecialty: null };
+}
+
+export type SourceRecruiterTarget = {
+  id: string;
+  contactKind: ContactKind;
+  deleted: boolean;
+};
+
+export type PlanRecruiterSourceSuccess = {
+  ok: true;
+  source: PersonSource;
+  sourceRecruiterId: string | null;
+};
+
+export type PlanRecruiterSourceResult =
+  | PlanRecruiterSourceSuccess
+  | PlanManualContactError;
+
+export function planRecruiterSource(input: {
+  source: PersonSource;
+  sourceRecruiterId: string | null | undefined;
+  personId: string | null;
+  target?: SourceRecruiterTarget | null;
+}): PlanRecruiterSourceResult {
+  if (input.source === "recruiter") {
+    if (!input.sourceRecruiterId) {
+      return failContact(
+        400,
+        "RECRUITER_REQUIRED",
+        "Recruiter source requires a recruiter contact",
+      );
+    }
+    if (input.personId && input.sourceRecruiterId === input.personId) {
+      return failContact(
+        400,
+        "RECRUITER_SELF",
+        "A contact cannot be sourced from itself",
+      );
+    }
+    if (input.target === undefined) {
+      return {
+        ok: true,
+        source: "recruiter",
+        sourceRecruiterId: input.sourceRecruiterId,
+      };
+    }
+    if (!input.target || input.target.deleted) {
+      return failContact(
+        400,
+        "RECRUITER_NOT_FOUND",
+        "Recruiter contact not found",
+      );
+    }
+    if (input.target.contactKind !== "recruiter") {
+      return failContact(
+        400,
+        "NOT_A_RECRUITER",
+        "Source must be a recruiter contact",
+      );
+    }
+    return {
+      ok: true,
+      source: "recruiter",
+      sourceRecruiterId: input.sourceRecruiterId,
+    };
+  }
+  if (input.sourceRecruiterId) {
+    return failContact(
+      400,
+      "RECRUITER_SOURCE_ONLY",
+      "Recruiter can only be set when source is recruiter",
+    );
+  }
+  return { ok: true, source: input.source, sourceRecruiterId: null };
+}
+
+export const createPersonBodySchema = z
+  .object({
+    name: z.string().trim().min(1),
+    email: emailInputSchema,
+    title: z.string().trim().min(1).optional(),
+    company: z.string().trim().min(1).optional(),
+    location: z.string().trim().min(1).optional(),
+    source: personSourceSchema.default("other"),
+    notes: z.string().trim().min(1).optional(),
+    firstTask: createTaskBodySchema.optional(),
+    contactKind: contactKindSchema.default("contact"),
+    recruiterSpecialty: recruiterSpecialtySchema.optional(),
+    sourceRecruiterId: uuidSchema.optional(),
+  })
+  .superRefine((data, ctx) => {
+    const kind = planContactKindChange({
+      contactKind: data.contactKind,
+      recruiterSpecialty: data.recruiterSpecialty,
+      programTrack: null,
+      hasBoardCard: false,
+      source: data.source,
+    });
+    if (!kind.ok) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["contactKind"],
+        message: kind.message,
+      });
+      return;
+    }
+    const source = planRecruiterSource({
+      source: data.source,
+      sourceRecruiterId: data.sourceRecruiterId,
+      personId: null,
+    });
+    if (!source.ok) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sourceRecruiterId"],
+        message: source.message,
+      });
+    }
+  });
+export type CreatePersonBody = z.infer<typeof createPersonBodySchema>;
+
+export const createPersonResponseSchema = z.object({
+  personId: uuidSchema,
+  reusedPerson: z.boolean(),
+});
+export type CreatePersonResponse = z.infer<typeof createPersonResponseSchema>;
+
 export const personBoardBadgeSchema = z.discriminatedUnion("board", [
   z.object({
     board: z.literal("allocation"),
@@ -214,6 +410,7 @@ export const personDetailResponseSchema = z.object({
   board: personBoardBadgeSchema.nullable(),
   tasks: z.array(taskSchema),
   timeline: z.array(timelineItemSchema),
+  taskGuidePayloads: z.array(activityPayloadSchema),
   scoreHoldSummary: z.string().nullable(),
   campaignHold: personCampaignHoldSchema.nullable(),
 });

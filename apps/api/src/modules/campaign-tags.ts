@@ -64,6 +64,7 @@ export const campaignTagRoutes: FastifyPluginAsyncZod = async (app) => {
             gt(personCampaignTags.revision, sinceRevision),
             isNull(people.deletedAt),
             eq(people.doNotContact, false),
+            eq(people.contactKind, "contact"),
           ),
         );
       const asOf = new Date().toISOString();

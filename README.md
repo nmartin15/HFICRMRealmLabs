@@ -36,7 +36,7 @@ pnpm test
 pnpm lint
 ```
 
-Tests cover routing, report math, email matching, scoring math, suppression precedence, and unsubscribe GET-never-writes. Do not add UI tests.
+Tests cover routing, report math, email matching, scoring math, suppression precedence, unsubscribe GET-never-writes, and recruiter source/kind planners. Do not add UI tests.
 
 ## Invariants that must not drift
 
@@ -44,6 +44,7 @@ Tests cover routing, report math, email matching, scoring math, suppression prec
 - Campaign From is `@mail.realmlabs.co` only. Enqueue is not send: drain claims `queued → sending` before Postmark. `POSTMARK_SEND_ENABLED` stays false until verify-webhook is 200 and `ALERT_WEBHOOK_URL` pages.
 - Suppression is HMAC of `canonicalEmail`, tombstone before purge. Consent (`inquiry` / `newsletter` / `stay_in_touch`) is a separate subsystem.
 - Kickbox is new website form intake only.
+- Contacts may be `contact` or `recruiter` (`quant_analyst` | `quant_developer`). Recruiter people are lead sources, not campaign leads: skip scoring, campaign tags, and outbound send. Source `recruiter` points at a recruiter person id. A recruiter cannot themselves have source `recruiter`.
 - Timestamps UTC in the database, displayed `America/Los_Angeles`. Keyboard-first boards and lists (`j`/`k`, enter, esc).
 
 Env names and comments: `.env.example`. Production is Fly (`fly.web.toml`, `fly.api.toml`, `fly.worker.toml`, `fly.backup.toml`) or `docker-compose.prod.yml`.

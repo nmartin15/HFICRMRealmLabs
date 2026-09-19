@@ -20,8 +20,13 @@ import { fromDatetimeLocalValue, todayTaskDueLocal } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  MANUAL_SOURCES,
+  RecruiterPicker,
+  SourceSelect,
+  useRecruiters,
+} from "@/components/recruiter-fields";
 
-const SOURCES: PersonSource[] = ["linkedin", "workable", "referral", "other"];
 const TRACKS: ProgramTrack[] = [
   "allocation",
   "incubator",
@@ -56,6 +61,7 @@ export function ApplicantDialog({
   const [company, setCompany] = useState("");
   const [location, setLocation] = useState("");
   const [source, setSource] = useState<PersonSource>("other");
+  const [sourceRecruiterId, setSourceRecruiterId] = useState("");
   const [programTrack, setProgramTrack] = useState<ProgramTrack>(pipeline);
   const [appliedAt, setAppliedAt] = useState(
     todayIsoInDisplayZone(new Date()),
@@ -64,6 +70,7 @@ export function ApplicantDialog({
   const [firstTaskKind, setFirstTaskKind] = useState<TaskKind>("email");
   const [firstTaskDue, setFirstTaskDue] = useState(todayTaskDueLocal);
   const [firstTaskNotes, setFirstTaskNotes] = useState("");
+  const recruiters = useRecruiters(open);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -79,6 +86,7 @@ export function ApplicantDialog({
       setCompany("");
       setLocation("");
       setSource("other");
+      setSourceRecruiterId("");
       setProgramTrack(pipeline);
       setAppliedAt(todayIsoInDisplayZone(new Date()));
       setApplicationRef("");
@@ -108,6 +116,9 @@ export function ApplicantDialog({
         ...(firstTaskNotes.trim() ? { notes: firstTaskNotes.trim() } : {}),
       },
     };
+    if (source === "recruiter" && sourceRecruiterId) {
+      shared.sourceRecruiterId = sourceRecruiterId;
+    }
     if (title.trim()) {
       shared.title = title.trim();
     }
@@ -227,23 +238,26 @@ export function ApplicantDialog({
               onChange={(event) => setLocation(event.target.value)}
             />
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="applicant-source">Source</Label>
-            <select
-              id="applicant-source"
-              className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
-              value={source}
-              onChange={(event) =>
-                setSource(event.target.value as PersonSource)
+          <SourceSelect
+            id="applicant-source"
+            value={source}
+            sources={MANUAL_SOURCES}
+            onChange={(value) => {
+              setSource(value);
+              if (value !== "recruiter") {
+                setSourceRecruiterId("");
               }
-            >
-              {SOURCES.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
+            }}
+          />
+          {source === "recruiter" ? (
+            <RecruiterPicker
+              id="applicant-source-recruiter"
+              required
+              value={sourceRecruiterId}
+              recruiters={recruiters}
+              onChange={setSourceRecruiterId}
+            />
+          ) : null}
           <div className="space-y-1">
             <Label htmlFor="applicant-applied">Applied</Label>
             <Input

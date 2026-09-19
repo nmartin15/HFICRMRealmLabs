@@ -7,6 +7,7 @@ import {
   isoDateTimeSchema,
   leadTempSchema,
   uuidSchema,
+  type ContactKind,
   type LeadTemp,
   type ProgramTrack,
   type SuppressionReason,
@@ -153,6 +154,7 @@ export type ResolveCampaignTagInput = {
   stayInTouch: boolean;
   doNotContact: boolean;
   newsletterGranted: boolean;
+  contactKind?: ContactKind;
 };
 
 export type ResolvedCampaignTag = {
@@ -167,7 +169,7 @@ export type ResolvedCampaignTag = {
 export function resolveCampaignTag(
   input: ResolveCampaignTagInput,
 ): ResolvedCampaignTag | null {
-  if (input.doNotContact) {
+  if (input.doNotContact || input.contactKind === "recruiter") {
     return null;
   }
 

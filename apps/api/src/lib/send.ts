@@ -49,10 +49,12 @@ export async function sendEmail(
         .where(eq(personConsents.personId, input.personId))
     : [];
   let emailUndeliverable = false;
+  let contactKind: "contact" | "recruiter" = "contact";
   if (input.personId) {
     const personRows = await db
       .select({
         emailVerificationResult: people.emailVerificationResult,
+        contactKind: people.contactKind,
       })
       .from(people)
       .where(eq(people.id, input.personId))
@@ -60,6 +62,7 @@ export async function sendEmail(
     emailUndeliverable = kickboxBlocksSend(
       parseKickboxResult(personRows[0]?.emailVerificationResult),
     );
+    contactKind = personRows[0]?.contactKind ?? "contact";
   }
   const plan = planOutboundSend({
     suppressionReason,
@@ -69,6 +72,7 @@ export async function sendEmail(
     newsletterGranted: hasNewsletterGrant(consentRows),
     emailUndeliverable,
     isSeed: false,
+    contactKind,
   });
   if (!plan.ok) {
     throw httpError(403, plan.code, plan.message);

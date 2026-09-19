@@ -1,6 +1,8 @@
 import {
   planCreateTask,
   planManualContact,
+  planContactKindChange,
+  planRecruiterSource,
   type CreatePersonBody,
   type CreatePersonResponse,
   type PlanManualContactExisting,
@@ -10,6 +12,7 @@ import { findPersonByEmail, people, tasks, type Database } from "@realm-labs/db"
 import type { AuthedUser } from "../plugins/auth.js";
 import { httpError } from "../plugins/error.js";
 import { writeActivity } from "./activity.js";
+import { loadSourceRecruiterTarget } from "./recruiters.js";
 import { suppressionReasonForEmail, writeSuppression } from "./suppression.js";
 
 function nullable(value: string | undefined): string | null {
@@ -49,6 +52,27 @@ export async function createManualContact(
     throw httpError(plan.status, plan.code, plan.message);
   }
 
+  const kindPlan = planContactKindChange({
+    contactKind: body.contactKind,
+    recruiterSpecialty: body.recruiterSpecialty,
+    programTrack: null,
+    hasBoardCard: false,
+    source: body.source,
+  });
+  if (!kindPlan.ok) {
+    throw httpError(kindPlan.status, kindPlan.code, kindPlan.message);
+  }
+
+  const sourcePlan = planRecruiterSource({
+    source: body.source,
+    sourceRecruiterId: body.sourceRecruiterId,
+    personId: plan.reusePersonId,
+    target: await loadSourceRecruiterTarget(db, body.sourceRecruiterId),
+  });
+  if (!sourcePlan.ok) {
+    throw httpError(sourcePlan.status, sourcePlan.code, sourcePlan.message);
+  }
+
   const when = new Date();
   const who = { id: actor.id, email: actor.email };
 
@@ -68,7 +92,10 @@ export async function createManualContact(
           title: nullable(body.title) ?? existingPerson.title,
           company: nullable(body.company) ?? existingPerson.company,
           location: nullable(body.location) ?? existingPerson.location,
-          source: body.source,
+          source: sourcePlan.source,
+          sourceRecruiterId: sourcePlan.sourceRecruiterId,
+          contactKind: kindPlan.contactKind,
+          recruiterSpecialty: kindPlan.recruiterSpecialty,
           notes: nullable(body.notes) ?? existingPerson.notes,
           ownerId: existingPerson.ownerId ?? actor.id,
         })
@@ -96,7 +123,10 @@ export async function createManualContact(
           title: nullable(body.title),
           company: nullable(body.company),
           location: nullable(body.location),
-          source: body.source,
+          source: sourcePlan.source,
+          sourceRecruiterId: sourcePlan.sourceRecruiterId,
+          contactKind: kindPlan.contactKind,
+          recruiterSpecialty: kindPlan.recruiterSpecialty,
           notes: nullable(body.notes),
           programTrack: null,
           ownerId: actor.id,
@@ -116,7 +146,14 @@ export async function createManualContact(
           what: "person.create",
           when: when.toISOString(),
           before: null,
-          after: { email: body.email, programTrack: null },
+          after: {
+            email: body.email,
+            programTrack: null,
+            contactKind: kindPlan.contactKind,
+            recruiterSpecialty: kindPlan.recruiterSpecialty,
+            source: sourcePlan.source,
+            sourceRecruiterId: sourcePlan.sourceRecruiterId,
+          },
         },
       });
     }
