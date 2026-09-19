@@ -38,6 +38,7 @@ import {
   personEmails,
   tasks,
   users,
+  deleteTasks,
   type Database,
 } from "@realm-labs/db";
 import { and, eq, isNull } from "drizzle-orm";
@@ -1016,8 +1017,11 @@ async function upsertCalendarMeeting(
     const duplicates = openWithoutEvent.filter((row) =>
       plan.closeDuplicateIds.includes(row.id),
     );
+    await deleteTasks(
+      db,
+      duplicates.map((row) => row.id),
+    );
     for (const duplicate of duplicates) {
-      await db.delete(tasks).where(eq(tasks.id, duplicate.id));
       await writeActivity(db, {
         personId: input.person.id,
         userId: input.actor.id,

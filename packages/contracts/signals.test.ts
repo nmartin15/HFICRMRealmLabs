@@ -98,6 +98,18 @@ describe("extractDocument", () => {
     expect(result).not.toHaveProperty("bucket");
   });
 
+  it("extracts incubator interest from meeting completion notes", () => {
+    const result = extractDocument({
+      text: "Engineer looking for a career switch to quant trading, interested in incubator. Followed up 2026-08-24 to schedule first call",
+    });
+    expect(
+      result.findings.some(
+        (row) =>
+          row.kind === "program_fit" && row.value.fit === "yes",
+      ),
+    ).toBe(true);
+  });
+
   it("ignores quoted operator text", () => {
     const result = extractDocument({
       text: "Sounds good.\n\nOn Mon, Nathan wrote:\n> The program fee is $10k if you can pay.",

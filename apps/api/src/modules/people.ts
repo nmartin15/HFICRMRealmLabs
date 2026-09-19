@@ -48,6 +48,7 @@ import {
   tasks,
   users,
   type Database,
+  deleteTasks,
 } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
 import { createManualContact } from "../lib/contacts.js";
@@ -1138,7 +1139,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         throw httpError(404, "NOT_FOUND", "Task not found");
       }
 
-      await app.db.delete(tasks).where(eq(tasks.id, current.id));
+      await deleteTasks(app.db, [current.id]);
       const when = new Date();
       await writeActivity(app.db, {
         personId: row.id,

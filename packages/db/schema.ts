@@ -535,16 +535,16 @@ export const personSignals = pgTable(
     sourceType: personSignalSourceEnum("source_type").notNull(),
     sourceEmailMessageId: uuid("source_email_message_id").references(
       () => emailMessages.id,
-      { onDelete: "set null" },
+      { onDelete: "cascade" },
     ),
     sourceTaskId: uuid("source_task_id").references(() => tasks.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     sourceMeetingId: uuid("source_meeting_id").references(() => meetings.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     sourceActivityId: uuid("source_activity_id").references(() => activities.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     extractor: text("extractor").notNull(),
     invalidatedAt: timestamp("invalidated_at", {

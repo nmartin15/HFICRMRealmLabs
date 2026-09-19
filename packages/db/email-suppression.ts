@@ -21,6 +21,7 @@ import {
   meetings,
   people,
   personCampaignTags,
+  personSignals,
   tasks,
 } from "./schema";
 
@@ -181,6 +182,9 @@ export async function purgePersonGraph(
     .update(emailThreads)
     .set({ personId: null })
     .where(eq(emailThreads.personId, input.personId));
+  await db
+    .delete(personSignals)
+    .where(eq(personSignals.personId, input.personId));
   await db.delete(tasks).where(eq(tasks.personId, input.personId));
   await db.delete(meetings).where(eq(meetings.personId, input.personId));
   await db

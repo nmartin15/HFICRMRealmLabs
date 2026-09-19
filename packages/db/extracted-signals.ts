@@ -1,7 +1,8 @@
-import { and, eq, isNull, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, type SQL } from "drizzle-orm";
 import type { Database } from "./client";
 import {
   personSignals,
+  tasks,
   type personSignalKindEnum,
   type personSignalSourceEnum,
 } from "./schema";
@@ -99,4 +100,21 @@ export async function insertExtractedSignals(
     inserted += 1;
   }
   return inserted;
+}
+
+/**
+ * Task-sourced signals require `source_task_id`. ON DELETE SET NULL would
+ * violate `person_signals_source_fk`, so drop those rows before the task.
+ */
+export async function deleteTasks(
+  db: Database,
+  ids: readonly string[],
+): Promise<void> {
+  if (ids.length === 0) {
+    return;
+  }
+  await db
+    .delete(personSignals)
+    .where(inArray(personSignals.sourceTaskId, [...ids]));
+  await db.delete(tasks).where(inArray(tasks.id, [...ids]));
 }

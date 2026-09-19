@@ -12,7 +12,11 @@ export {
   persistEmailSuppression,
   purgePersonGraph,
 } from "./email-suppression";
-export { insertExtractedSignals, type ExtractedSignalInsert } from "./extracted-signals";
+export {
+  deleteTasks,
+  insertExtractedSignals,
+  type ExtractedSignalInsert,
+} from "./extracted-signals";
 export {
   blockQueuedOutboundSends,
   claimOutboundSendingIfQueued,
