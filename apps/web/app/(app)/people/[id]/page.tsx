@@ -136,6 +136,10 @@ export default function PersonRecordPage() {
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null);
   const [releasingHot, setReleasingHot] = useState(false);
+  const [operatorLevel, setOperatorLevel] = useState<
+    OperatorWarmthLevel | ""
+  >("");
+  const [inspectReload, setInspectReload] = useState(0);
 
   const load = useCallback(async () => {
     const [personRes, userRes] = await Promise.all([
@@ -223,6 +227,24 @@ export default function PersonRecordPage() {
 
   async function setOperatorWarmth(level: OperatorWarmthLevel) {
     setError("");
+    // #region agent log
+    fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "4bef3e",
+      },
+      body: JSON.stringify({
+        sessionId: "4bef3e",
+        runId: "post-fix",
+        hypothesisId: "C",
+        location: "people/[id]/page.tsx:setOperatorWarmth",
+        message: "setOperatorWarmth start",
+        data: { level },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     try {
       await api(`/people/${id}/operator-temp`, {
         method: "POST",
@@ -231,6 +253,30 @@ export default function PersonRecordPage() {
       setSaveHint("Judgment saved");
       window.setTimeout(() => setSaveHint(""), 1500);
       await load();
+      setInspectReload((current) => current + 1);
+      // #region agent log
+      fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "4bef3e",
+        },
+        body: JSON.stringify({
+          sessionId: "4bef3e",
+          runId: "post-fix",
+          hypothesisId: "D",
+          location: "people/[id]/page.tsx:setOperatorWarmth",
+          message: "setOperatorWarmth success",
+          data: {
+            level,
+            selectValue:
+              (document.getElementById("leadTemp") as HTMLSelectElement | null)
+                ?.value ?? null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
     } catch (err) {
       setError(saveErrorMessage(err, "Failed to save judgment"));
     }
@@ -648,14 +694,37 @@ export default function PersonRecordPage() {
               <select
                 id="leadTemp"
                 className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
-                defaultValue=""
+                value={operatorLevel}
                 onChange={(event) => {
                   const value = event.target.value;
+                  // #region agent log
+                  fetch("http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "X-Debug-Session-Id": "4bef3e",
+                    },
+                    body: JSON.stringify({
+                      sessionId: "4bef3e",
+                      runId: "post-fix",
+                      hypothesisId: "B",
+                      location: "people/[id]/page.tsx:judgment-change",
+                      message: "judgment select change",
+                      data: {
+                        value,
+                        emptyBailed: !value,
+                        optionCount: event.currentTarget.options.length,
+                      },
+                      timestamp: Date.now(),
+                    }),
+                  }).catch(() => {});
+                  // #endregion
                   if (!value) {
                     return;
                   }
-                  void setOperatorWarmth(value as OperatorWarmthLevel);
-                  event.currentTarget.value = "";
+                  const level = value as OperatorWarmthLevel;
+                  setOperatorLevel(level);
+                  void setOperatorWarmth(level);
                 }}
               >
                 <option value="">Set judgment…</option>
@@ -670,6 +739,7 @@ export default function PersonRecordPage() {
               <p className="text-xs text-muted-foreground">
                 Skeptical lowers the score. Watch, pursue, and priority raise
                 it. This does not set campaign temp.
+                {saveHint ? ` · ${saveHint}` : ""}
               </p>
             </>
           )}
@@ -745,7 +815,12 @@ export default function PersonRecordPage() {
       </section>
 
       {user && canInspectScoring(user.role) ? (
-        <ScoreInspectPanel personId={id} onChanged={() => void load()} />
+        <ScoreInspectPanel
+          personId={id}
+          reloadToken={inspectReload}
+          onChanged={() => void load()}
+          onOperatorChange={(level) => setOperatorLevel(level ?? "")}
+        />
       ) : null}
 
       <section className="space-y-3">

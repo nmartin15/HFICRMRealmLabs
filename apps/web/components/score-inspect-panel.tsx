@@ -1,7 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import type { PersonInspectResponse } from "@realm-labs/contracts";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  OperatorWarmthLevel,
+  PersonInspectResponse,
+} from "@realm-labs/contracts";
 import {
   LEAD_TEMP_LABELS,
   OPERATOR_WARMTH_LABELS,
@@ -29,18 +32,27 @@ function sleep(ms: number): Promise<void> {
 
 export function ScoreInspectPanel({
   personId,
+  reloadToken = 0,
   onChanged,
+  onOperatorChange,
 }: {
   personId: string;
+  reloadToken?: number;
   onChanged?: () => void;
+  onOperatorChange?: (level: OperatorWarmthLevel | null) => void;
 }) {
   const [inspect, setInspect] = useState<PersonInspectResponse | null>(null);
   const [error, setError] = useState("");
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const onOperatorChangeRef = useRef(onOperatorChange);
+  onOperatorChangeRef.current = onOperatorChange;
 
   const load = useCallback(async () => {
     const data = await api<PersonInspectResponse>(`/people/${personId}/inspect`);
     setInspect(data);
+    onOperatorChangeRef.current?.(
+      data.operator.active ? data.operator.level : null,
+    );
     return data;
   }, [personId]);
 
@@ -48,7 +60,7 @@ export function ScoreInspectPanel({
     void load().catch((err: unknown) => {
       setError(err instanceof Error ? err.message : "Failed to load inspect");
     });
-  }, [load]);
+  }, [load, reloadToken]);
 
   async function invalidate(signalId: string) {
     setError("");
