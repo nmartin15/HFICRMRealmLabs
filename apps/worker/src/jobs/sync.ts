@@ -21,6 +21,7 @@ import {
   matchPersonFromParticipants,
   parseEmailAddresses,
   planCalendarMeetingTask,
+  shouldIngestGmailThread,
   shouldProcessGmailThreadId,
   uniqueEmails,
   zonedLocalToUtc,
@@ -41,7 +42,7 @@ import {
   deleteTasks,
   type Database,
 } from "@realm-labs/db";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { google, type calendar_v3, type gmail_v1 } from "googleapis";
 import type { Env } from "../env.js";
 import { writeActivity } from "../lib/activity.js";
@@ -136,6 +137,22 @@ async function markSyncOk(
       gmailHistoryId: historyId,
     })
     .where(eq(mailboxConnections.mailbox, mailbox));
+}
+
+async function deleteUnmatchedEmailThreads(db: Database): Promise<void> {
+  const unmatched = await db
+    .select({ id: emailThreads.id })
+    .from(emailThreads)
+    .where(isNull(emailThreads.personId));
+  const ids = unmatched.map((row) => row.id);
+  const chunkSize = 500;
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    await db.delete(emailMessages).where(inArray(emailMessages.threadId, chunk));
+  }
+  if (ids.length > 0) {
+    await db.delete(emailThreads).where(isNull(emailThreads.personId));
+  }
 }
 
 async function storedGmailThreads(
@@ -574,9 +591,20 @@ async function processGmailThread(
     input.people,
     input.mailboxAddresses,
   );
-  const person = matched
-    ? input.people.find((row) => row.id === matched.id) ?? null
-    : null;
+  if (
+    !matched ||
+    !shouldIngestGmailThread({
+      participantEmails,
+      people: input.people,
+      mailboxAddresses: input.mailboxAddresses,
+    })
+  ) {
+    return;
+  }
+  const person = input.people.find((row) => row.id === matched.id);
+  if (!person) {
+    return;
+  }
 
   const full = await getGmailThread(
     gmail,
@@ -601,7 +629,7 @@ async function processGmailThread(
     lastMessageAt,
     snippet,
     participantEmails,
-    personId: person?.id ?? null,
+    personId: matched.id,
     latestFrom,
     latestToEmails,
     latestCcEmails,
@@ -612,9 +640,6 @@ async function processGmailThread(
     mailboxAddresses: input.mailboxAddresses,
   });
   await upsertGmailMessages(db, thread.id, bodies);
-  if (!person || !matched) {
-    return;
-  }
   const storedMessages = await db
     .select()
     .from(emailMessages)
@@ -721,6 +746,7 @@ export async function runGmailSync(
     const personRows = await loadPeople(db);
     const addresses = mailboxEmails();
     const budget = createGmailQuotaBudget();
+    await deleteUnmatchedEmailThreads(db);
 
     const profileAtStart = await callGmail(
       async () => {
@@ -772,14 +798,6 @@ export async function runGmailSync(
         addresses,
         budget,
       );
-      for (const threadId of await listThreadIdsForQuery(
-        gmail,
-        budget,
-        "newer_than:14d -in:chats",
-      )) {
-        backfillIds.push(threadId);
-      }
-      backfillIds = [...new Set(backfillIds)];
     }
 
     const threadIds = [...new Set([...historyThreadIds, ...backfillIds])];

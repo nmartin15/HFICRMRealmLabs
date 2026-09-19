@@ -9,9 +9,11 @@ const source = readFileSync(
 );
 
 describe("gmail sync job", () => {
-  it("does not wipe unmatched threads that the inbox and home todos read", () => {
-    expect(source).not.toContain("deleteUnmatchedEmailThreads");
-    expect(source).toContain("personId: person?.id ?? null");
+  it("drops unmatched mail and never dumps the whole mailbox by date", () => {
+    expect(source).toContain("deleteUnmatchedEmailThreads");
+    expect(source).toContain("shouldIngestGmailThread");
+    expect(source).not.toContain("newer_than:");
+    expect(source).not.toContain("personId: person?.id ?? null");
   });
 
   it("checkpoints historyId captured at the start of the run", () => {
@@ -37,6 +39,6 @@ describe("gmail sync job", () => {
 
   it("logs people and skip counts so a cloud miss can be diagnosed", () => {
     expect(source).toContain("gmail.sync ${mailbox} people=");
-    expect(source).toContain("newer_than:14d");
+    expect(source).toContain("listContactThreadIds");
   });
 });

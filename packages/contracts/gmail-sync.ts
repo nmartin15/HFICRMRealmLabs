@@ -1,3 +1,10 @@
+import {
+  gmailContactSearchQueries,
+  matchPersonFromParticipants,
+  mailboxEmails,
+  type PersonEmailMatch,
+} from "./email-matching";
+
 export const GMAIL_QUOTA_PAUSED_MESSAGE =
   "Gmail quota paused; next sync will continue";
 
@@ -142,4 +149,29 @@ export function shouldProcessGmailThreadId(input: {
     return true;
   }
   return !input.skipThreadIds.has(input.threadId);
+}
+
+/** Only CRM contact threads are stored. Newsletters and unknown senders are dropped. */
+export function shouldIngestGmailThread(input: {
+  participantEmails: readonly string[];
+  people: readonly PersonEmailMatch[];
+  mailboxAddresses?: readonly string[];
+}): boolean {
+  return (
+    matchPersonFromParticipants(
+      input.participantEmails,
+      input.people,
+      input.mailboxAddresses ?? mailboxEmails(),
+    ) !== null
+  );
+}
+
+export function gmailContactBackfillQueries(
+  emails: readonly string[],
+  mailboxAddresses?: readonly string[],
+): string[] {
+  return gmailContactSearchQueries(
+    emails,
+    mailboxAddresses ?? mailboxEmails(),
+  );
 }

@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
+import { gmailContactSearchQueries } from "./email-matching";
+import { PERSONAL_MAILBOX_EMAIL, PARTNER_MAILBOX_EMAIL } from "./mailboxes";
 import {
   GMAIL_QUOTA_PAUSED_MESSAGE,
+  gmailContactBackfillQueries,
   gmailHistoryChangedThreadIds,
   gmailHistoryIdToPersist,
   gmailSyncPlan,
   gmailSyncShouldPersistHistoryId,
   gmailThreadIdsToSkip,
+  shouldIngestGmailThread,
   shouldProcessGmailThreadId,
 } from "./gmail-sync";
+
+const jane = { id: "11111111-1111-4111-8111-111111111111", email: "jane@example.com" };
+const mailboxes = [PERSONAL_MAILBOX_EMAIL, PARTNER_MAILBOX_EMAIL];
 
 describe("gmail sync plan", () => {
   it("resumes a first contact backfill by skipping threads already stored", () => {
@@ -154,5 +161,49 @@ describe("gmail thread skip and history ids", () => {
         },
       ]),
     ).toEqual(["a", "b"]);
+  });
+});
+
+describe("gmail ingest is contact-only", () => {
+  it("stores a thread only when a CRM contact email is on it", () => {
+    expect(
+      shouldIngestGmailThread({
+        participantEmails: [PERSONAL_MAILBOX_EMAIL, jane.email],
+        people: [jane],
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBe(true);
+  });
+
+  it("drops newsletters and unknown senders that are not a contact", () => {
+    expect(
+      shouldIngestGmailThread({
+        participantEmails: [PERSONAL_MAILBOX_EMAIL, "hello@fly.io"],
+        people: [jane],
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBe(false);
+    expect(
+      shouldIngestGmailThread({
+        participantEmails: ["deals@newsletter.example", PARTNER_MAILBOX_EMAIL],
+        people: [jane],
+        mailboxAddresses: mailboxes,
+      }),
+    ).toBe(false);
+  });
+
+  it("backfills with per-contact Gmail search, never a mailbox-wide date dump", () => {
+    const queries = gmailContactBackfillQueries(
+      [jane.email, PERSONAL_MAILBOX_EMAIL, "alex@example.com"],
+      mailboxes,
+    );
+    expect(queries.length).toBeGreaterThan(0);
+    expect(queries.every((query) => !query.includes("newer_than"))).toBe(true);
+    expect(queries).toEqual(
+      gmailContactSearchQueries(
+        [jane.email, PERSONAL_MAILBOX_EMAIL, "alex@example.com"],
+        mailboxes,
+      ),
+    );
   });
 });
