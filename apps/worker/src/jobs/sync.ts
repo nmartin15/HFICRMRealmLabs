@@ -21,6 +21,8 @@ import {
   matchPersonFromParticipants,
   parseEmailAddresses,
   planCalendarMeetingTask,
+  isOpenMeetingSupersededByLaterOutcome,
+  latestHandSetMeetingDueAt,
   shouldIngestGmailThread,
   shouldProcessGmailThreadId,
   uniqueEmails,
@@ -42,7 +44,7 @@ import {
   deleteTasks,
   type Database,
 } from "@realm-labs/db";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { google, type calendar_v3, type gmail_v1 } from "googleapis";
 import type { Env } from "../env.js";
 import { writeActivity } from "../lib/activity.js";
@@ -973,6 +975,7 @@ async function upsertCalendarMeeting(
     hasReplacement: boolean;
     actor: Actor;
     mailboxAddresses: readonly string[];
+    latestClosedDueAt: string | null;
   },
 ): Promise<void> {
   const calendarEventId = input.event.id;
@@ -1057,6 +1060,33 @@ async function upsertCalendarMeeting(
         },
       });
     }
+  }
+
+  const superseded = isOpenMeetingSupersededByLaterOutcome({
+    dueAt: input.scheduledAt.toISOString(),
+    latestClosedDueAt: input.latestClosedDueAt,
+  });
+  if (superseded) {
+    if (plan.action === "update") {
+      await db
+        .update(tasks)
+        .set({
+          dueAt: input.scheduledAt,
+          calendarEventId,
+          outcome: "rescheduled",
+          status: "rescheduled",
+          needsReview: false,
+          attendeeAccepted,
+        })
+        .where(eq(tasks.id, plan.taskId));
+      await syncMeetingAttendeeAccepted(db, {
+        personId: input.person.id,
+        calendarEventId,
+        attendeeAccepted,
+        scheduledAt: input.scheduledAt,
+      });
+    }
+    return;
   }
 
   if (input.cancelled) {
@@ -1198,6 +1228,39 @@ export async function runCalendarSync(
     const personRows = await loadPeople(db);
     const addresses = mailboxEmails();
     const events = await listCalendarEvents(calendar, new Date());
+    const closedMeetingRows = await db
+      .select({
+        personId: tasks.personId,
+        dueAt: tasks.dueAt,
+        outcome: tasks.outcome,
+        status: tasks.status,
+      })
+      .from(tasks)
+      .where(and(eq(tasks.kind, "meeting"), ne(tasks.status, "open")));
+    const closedByPerson = new Map<
+      string,
+      Array<{
+        dueAt: string;
+        outcome: (typeof closedMeetingRows)[number]["outcome"];
+        status: string;
+      }>
+    >();
+    for (const row of closedMeetingRows) {
+      const list = closedByPerson.get(row.personId) ?? [];
+      list.push({
+        dueAt: row.dueAt.toISOString(),
+        outcome: row.outcome,
+        status: row.status,
+      });
+      closedByPerson.set(row.personId, list);
+    }
+    const latestClosedByPerson = new Map<string, string>();
+    for (const [personId, rows] of closedByPerson) {
+      const latest = latestHandSetMeetingDueAt(rows);
+      if (latest) {
+        latestClosedByPerson.set(personId, latest);
+      }
+    }
 
     const scoredPersonIds = new Set<string>();
     for (const event of events) {
@@ -1224,6 +1287,7 @@ export async function runCalendarSync(
             : false,
           actor,
           mailboxAddresses: addresses,
+          latestClosedDueAt: latestClosedByPerson.get(person.id) ?? null,
         });
         scoredPersonIds.add(person.id);
       }

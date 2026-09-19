@@ -4,12 +4,16 @@ import {
   canViewCard,
   canViewMeeting,
   canViewOperatorTask,
+  completedTaskIdFromPayload,
   emailThreadSchema,
   homeCounts,
   homeSnapshotResponseSchema,
   isIncubatorWaitingStage,
+  isOpenMeetingSupersededByLaterOutcome,
   isWithinUtcBounds,
+  latestHandSetMeetingDueAt,
   meetingDigestPersonSchema,
+  meetingTaskNeedsOutcome,
   operatorTasksQuerySchema,
   todayBoundsUtc,
   zonedIsoDate,
@@ -23,6 +27,7 @@ import {
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import {
+  activities,
   allocationCards,
   emailThreads,
   incubatorCards,
@@ -230,7 +235,7 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
           includeAllOperators,
         });
 
-      const leftoverMeetings: HomeScheduleItem[] = leftoverRows
+      let leftoverMeetings: HomeScheduleItem[] = leftoverRows
         .filter((row) => visibleTask(row.task.createdBy))
         .filter(
           (row) =>
@@ -244,9 +249,282 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
         )
         .map(toScheduleItem);
 
+      const leftoverPersonIds = [
+        ...new Set(leftoverMeetings.map((item) => item.person.id)),
+      ];
+      const latestClosedByPerson = new Map<string, string>();
+      if (leftoverPersonIds.length > 0) {
+        const closedMeetingRows = await app.db
+          .select({
+            personId: tasks.personId,
+            dueAt: tasks.dueAt,
+            outcome: tasks.outcome,
+            status: tasks.status,
+          })
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.kind, "meeting"),
+              ne(tasks.status, "open"),
+              inArray(tasks.personId, leftoverPersonIds),
+            ),
+          );
+        const closedByPerson = new Map<
+          string,
+          Array<{
+            dueAt: string;
+            outcome: (typeof closedMeetingRows)[number]["outcome"];
+            status: string;
+          }>
+        >();
+        for (const row of closedMeetingRows) {
+          const list = closedByPerson.get(row.personId) ?? [];
+          list.push({
+            dueAt: row.dueAt.toISOString(),
+            outcome: row.outcome,
+            status: row.status,
+          });
+          closedByPerson.set(row.personId, list);
+        }
+        for (const [personId, rows] of closedByPerson) {
+          const latest = latestHandSetMeetingDueAt(rows);
+          if (latest) {
+            latestClosedByPerson.set(personId, latest);
+          }
+        }
+      }
+
+      const leftoverCountBeforeSupersede = leftoverMeetings.length;
+      leftoverMeetings = leftoverMeetings.filter(
+        (item) =>
+          !isOpenMeetingSupersededByLaterOutcome({
+            dueAt: item.task.dueAt,
+            latestClosedDueAt:
+              latestClosedByPerson.get(item.person.id) ?? null,
+          }),
+      );
+
       const todayMeetings: HomeScheduleItem[] = todayMeetingRows
         .filter((row) => visibleTask(row.task.createdBy))
         .map(toScheduleItem);
+
+      // #region agent log
+      {
+        const leftoverByPerson = new Map<
+          string,
+          { matchReported: boolean; items: HomeScheduleItem[] }
+        >();
+        for (const item of leftoverMeetings) {
+          const current = leftoverByPerson.get(item.person.id);
+          const matchReported =
+            item.person.lastName.trim().toLowerCase() === "allen" &&
+            item.person.firstName.trim().toLowerCase().includes("gregory");
+          if (current) {
+            current.items.push(item);
+          } else {
+            leftoverByPerson.set(item.person.id, {
+              matchReported,
+              items: [item],
+            });
+          }
+        }
+        let topId: string | null = null;
+        let topCount = 0;
+        let reportedMatch = false;
+        let reportedCount = 0;
+        for (const [id, bucket] of leftoverByPerson) {
+          if (bucket.matchReported) {
+            reportedMatch = true;
+            reportedCount = bucket.items.length;
+            topId = id;
+            topCount = bucket.items.length;
+            break;
+          }
+          if (bucket.items.length > topCount) {
+            topCount = bucket.items.length;
+            topId = id;
+          }
+        }
+        if (!reportedMatch) {
+          topId = null;
+          topCount = 0;
+          for (const [id, bucket] of leftoverByPerson) {
+            if (bucket.items.length > topCount) {
+              topCount = bucket.items.length;
+              topId = id;
+            }
+          }
+        }
+        const topItems = topId
+          ? leftoverByPerson.get(topId)?.items ?? []
+          : [];
+        const uniqueDays = new Set(
+          topItems.map((item) => zonedIsoDate(new Date(item.task.dueAt))),
+        );
+        const calIds = new Set(
+          topItems.flatMap((item) =>
+            item.task.calendarEventId ? [item.task.calendarEventId] : [],
+          ),
+        );
+        const outcomes: Record<string, number> = {};
+        let needsReviewCount = 0;
+        let missingCalId = 0;
+        let nonScheduledOutcome = 0;
+        for (const item of topItems) {
+          const key = item.task.outcome ?? "null";
+          outcomes[key] = (outcomes[key] ?? 0) + 1;
+          if (item.task.needsReview) {
+            needsReviewCount += 1;
+          }
+          if (!item.task.calendarEventId) {
+            missingCalId += 1;
+          }
+          if (item.task.outcome && item.task.outcome !== "scheduled") {
+            nonScheduledOutcome += 1;
+          }
+        }
+        fetch(
+          "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Debug-Session-Id": "78acd3",
+            },
+            body: JSON.stringify({
+              sessionId: "78acd3",
+              runId: "post-fix",
+              hypothesisId: "B",
+              location: "apps/api/src/modules/home.ts:leftoverMeetings",
+              message: "home leftover summary",
+              data: {
+                leftoverCountBeforeSupersede,
+                leftoverCount: leftoverMeetings.length,
+                uniquePeople: leftoverByPerson.size,
+                reportedMatch,
+                reportedCount,
+                topCount,
+                topUniqueDays: uniqueDays.size,
+                topUniqueCalIds: calIds.size,
+                topMissingCalId: missingCalId,
+                topNeedsReview: needsReviewCount,
+                topNonScheduledOutcome: nonScheduledOutcome,
+                topOutcomes: outcomes,
+                todayCloseCount: todayMeetings.filter((item) =>
+                  meetingTaskNeedsOutcome(
+                    item.task.dueAt,
+                    item.task.status,
+                    now,
+                    item.task.needsReview,
+                  ),
+                ).length,
+              },
+              timestamp: Date.now(),
+            }),
+          },
+        ).catch(() => {});
+        if (topId) {
+          const closedMeetings = await app.db
+            .select({
+              status: tasks.status,
+              outcome: tasks.outcome,
+              needsReview: tasks.needsReview,
+            })
+            .from(tasks)
+            .where(
+              and(
+                eq(tasks.personId, topId),
+                eq(tasks.kind, "meeting"),
+                ne(tasks.status, "open"),
+              ),
+            );
+          const personActivities = await app.db
+            .select({ payload: activities.payload })
+            .from(activities)
+            .where(eq(activities.personId, topId));
+          const leftoverIds = new Set(topItems.map((item) => item.task.id));
+          const whatCounts: Record<string, number> = {};
+          let leftoverIdsOnCompleteTimeline = 0;
+          for (const row of personActivities) {
+            const what =
+              typeof row.payload.what === "string" ? row.payload.what : "";
+            if (
+              what === "meeting.outcome" ||
+              what === "task.complete" ||
+              what === "meeting.scheduled"
+            ) {
+              whatCounts[what] = (whatCounts[what] ?? 0) + 1;
+            }
+            const completedId = completedTaskIdFromPayload(row.payload);
+            if (completedId && leftoverIds.has(completedId)) {
+              leftoverIdsOnCompleteTimeline += 1;
+            }
+          }
+          const closedStatus: Record<string, number> = {};
+          const closedOutcome: Record<string, number> = {};
+          for (const row of closedMeetings) {
+            closedStatus[row.status] = (closedStatus[row.status] ?? 0) + 1;
+            const key = row.outcome ?? "null";
+            closedOutcome[key] = (closedOutcome[key] ?? 0) + 1;
+          }
+          fetch(
+            "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "78acd3",
+              },
+              body: JSON.stringify({
+                sessionId: "78acd3",
+                  runId: "post-fix",
+                hypothesisId: "A",
+                location: "apps/api/src/modules/home.ts:topLeftoverPerson",
+                message: "top leftover person closed tasks vs timeline",
+                data: {
+                  reportedMatch,
+                  leftoverOpenCount: topItems.length,
+                  leftoverIdsOnCompleteTimeline,
+                  closedMeetingCount: closedMeetings.length,
+                  closedStatus,
+                  closedOutcome,
+                  whatCounts,
+                },
+                timestamp: Date.now(),
+              }),
+            },
+          ).catch(() => {});
+          fetch(
+            "http://127.0.0.1:7730/ingest/89b437b8-26d6-4c8b-ad98-8baefe0420d9",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "78acd3",
+              },
+              body: JSON.stringify({
+                sessionId: "78acd3",
+                  runId: "post-fix",
+                hypothesisId: "C",
+                location: "apps/api/src/modules/home.ts:topLeftoverSample",
+                message: "top leftover sample tasks",
+                data: {
+                  reportedMatch,
+                  sample: topItems.slice(0, 6).map((item) => ({
+                    dueAt: item.task.dueAt,
+                    status: item.task.status,
+                    outcome: item.task.outcome,
+                    needsReview: item.task.needsReview,
+                    hasCalId: Boolean(item.task.calendarEventId),
+                  })),
+                },
+                timestamp: Date.now(),
+              }),
+            },
+          ).catch(() => {});
+        }
+      }
+      // #endregion
 
       const skipCallPersonIds = new Set<string>();
       for (const meeting of upcomingMeetingRows) {
@@ -271,6 +549,15 @@ export const homeRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const allOpenTasks = openTaskRows
         .filter((row) => visibleTask(row.task.createdBy))
+        .filter((row) => {
+          if (row.task.kind !== "meeting") {
+            return true;
+          }
+          return !isOpenMeetingSupersededByLaterOutcome({
+            dueAt: row.task.dueAt.toISOString(),
+            latestClosedDueAt: latestClosedByPerson.get(row.person.id) ?? null,
+          });
+        })
         .map((row) => ({
           id: row.task.id,
           personId: row.person.id,

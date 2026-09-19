@@ -113,6 +113,7 @@ export type PlanCompleteTaskSuccess = {
   status: Extract<TaskStatus, "done" | "rescheduled">;
   outcome: MeetingOutcome | null;
   closeDuplicateIds: string[];
+  supersedeLeftoverIds: string[];
   next: {
     kind: TaskKind;
     dueAt: string;
@@ -124,10 +125,14 @@ export function remainingOpenFollowUpCount(input: {
   otherOpenTaskCount?: number;
   otherOpenTasks?: OpenTaskSibling[];
   closeDuplicateIds?: string[];
+  supersedeLeftoverIds?: string[];
 }): number {
-  const duplicateSet = new Set(input.closeDuplicateIds ?? []);
+  const ignore = new Set([
+    ...(input.closeDuplicateIds ?? []),
+    ...(input.supersedeLeftoverIds ?? []),
+  ]);
   if (input.otherOpenTasks !== undefined) {
-    return input.otherOpenTasks.filter((task) => !duplicateSet.has(task.id)).length;
+    return input.otherOpenTasks.filter((task) => !ignore.has(task.id)).length;
   }
   return input.otherOpenTaskCount ?? 0;
 }
@@ -147,6 +152,12 @@ export function hasExistingOpenFollowUp(input: {
         currentKind: input.currentKind,
         currentDueAt: input.currentDueAt,
         currentCalendarEventId: input.currentCalendarEventId,
+        siblings: input.otherOpenTasks,
+      }),
+      supersedeLeftoverIds: priorOpenMeetingLeftovers({
+        currentId: input.currentId,
+        currentKind: input.currentKind,
+        currentDueAt: input.currentDueAt,
         siblings: input.otherOpenTasks,
       }),
     }) > 0
@@ -189,6 +200,78 @@ export function sameDayOpenMeetingDuplicates(input: {
     }
   }
   return ids;
+}
+
+export function priorOpenMeetingLeftovers(input: {
+  currentId: string;
+  currentKind: TaskKind;
+  currentDueAt: string;
+  siblings: OpenTaskSibling[];
+}): string[] {
+  if (input.currentKind !== "meeting") {
+    return [];
+  }
+  const currentMs = Date.parse(input.currentDueAt);
+  if (!Number.isFinite(currentMs)) {
+    return [];
+  }
+  const currentDay = zonedIsoDate(new Date(currentMs));
+  const ids: string[] = [];
+  for (const sibling of input.siblings) {
+    if (sibling.kind !== "meeting" || sibling.id === input.currentId) {
+      continue;
+    }
+    const siblingMs = Date.parse(sibling.dueAt);
+    if (!Number.isFinite(siblingMs) || siblingMs >= currentMs) {
+      continue;
+    }
+    if (zonedIsoDate(new Date(siblingMs)) === currentDay) {
+      continue;
+    }
+    ids.push(sibling.id);
+  }
+  return ids;
+}
+
+export function latestHandSetMeetingDueAt(
+  closed: Array<{ dueAt: string; outcome: MeetingOutcome | null; status: string }>,
+): string | null {
+  let latestMs = Number.NEGATIVE_INFINITY;
+  let latest: string | null = null;
+  for (const row of closed) {
+    if (row.status === "open") {
+      continue;
+    }
+    if (
+      row.outcome !== "held" &&
+      row.outcome !== "no_show" &&
+      row.outcome !== "rescheduled"
+    ) {
+      continue;
+    }
+    const ms = Date.parse(row.dueAt);
+    if (!Number.isFinite(ms) || ms < latestMs) {
+      continue;
+    }
+    latestMs = ms;
+    latest = row.dueAt;
+  }
+  return latest;
+}
+
+export function isOpenMeetingSupersededByLaterOutcome(input: {
+  dueAt: string;
+  latestClosedDueAt: string | null;
+}): boolean {
+  if (!input.latestClosedDueAt) {
+    return false;
+  }
+  const due = Date.parse(input.dueAt);
+  const closed = Date.parse(input.latestClosedDueAt);
+  if (!Number.isFinite(due) || !Number.isFinite(closed)) {
+    return false;
+  }
+  return zonedIsoDate(new Date(due)) <= zonedIsoDate(new Date(closed));
 }
 
 function fail(
@@ -320,6 +403,12 @@ export function planCompleteTask(input: {
     currentCalendarEventId: input.currentCalendarEventId ?? null,
     siblings: input.otherOpenTasks ?? [],
   });
+  const supersedeLeftoverIds = priorOpenMeetingLeftovers({
+    currentId: input.currentId ?? "",
+    currentKind: input.currentKind,
+    currentDueAt: input.currentDueAt ?? "",
+    siblings: input.otherOpenTasks ?? [],
+  });
 
   if (isDnc) {
     if (!notes) {
@@ -332,6 +421,7 @@ export function planCompleteTask(input: {
       status: "done",
       outcome: null,
       closeDuplicateIds,
+      supersedeLeftoverIds,
       next: null,
     };
   }
@@ -358,6 +448,7 @@ export function planCompleteTask(input: {
       status,
       outcome,
       closeDuplicateIds,
+      supersedeLeftoverIds,
       next: null,
     };
   }
@@ -366,6 +457,7 @@ export function planCompleteTask(input: {
     otherOpenTaskCount: input.otherOpenTaskCount,
     otherOpenTasks: input.otherOpenTasks,
     closeDuplicateIds,
+    supersedeLeftoverIds,
   });
   if (otherOpenTaskCount > 0 || !input.next) {
     return {
@@ -375,6 +467,7 @@ export function planCompleteTask(input: {
       status,
       outcome,
       closeDuplicateIds,
+      supersedeLeftoverIds,
       next: null,
     };
   }
@@ -391,6 +484,7 @@ export function planCompleteTask(input: {
     status,
     outcome,
     closeDuplicateIds,
+    supersedeLeftoverIds,
     next: {
       kind: input.next.kind,
       dueAt: input.next.dueAt,

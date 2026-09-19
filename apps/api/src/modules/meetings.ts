@@ -4,6 +4,7 @@ import {
   meetingIdParamsSchema,
   meetingOutcomePatchSchema,
   meetingSchema,
+  priorOpenMeetingLeftovers,
   sameDayOpenMeetingDuplicates,
   yesterdayBoundsUtc,
   type Meeting,
@@ -285,45 +286,83 @@ async function closeSameDayOpenMeetings(
         ne(tasks.id, input.currentId),
       ),
     );
+  const siblingOpen = siblings.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    dueAt: row.dueAt.toISOString(),
+    calendarEventId: row.calendarEventId,
+  }));
   const closeIds = sameDayOpenMeetingDuplicates({
     currentId: input.currentId,
     currentKind: "meeting",
     currentDueAt: input.dueAt.toISOString(),
     currentCalendarEventId: input.calendarEventId,
-    siblings: siblings.map((row) => ({
-      id: row.id,
-      kind: row.kind,
-      dueAt: row.dueAt.toISOString(),
-      calendarEventId: row.calendarEventId,
-    })),
+    siblings: siblingOpen,
   });
-  if (closeIds.length === 0) {
+  const supersedeIds = priorOpenMeetingLeftovers({
+    currentId: input.currentId,
+    currentKind: "meeting",
+    currentDueAt: input.dueAt.toISOString(),
+    siblings: siblingOpen,
+  });
+  if (closeIds.length === 0 && supersedeIds.length === 0) {
     return;
   }
   const status = input.outcome === "rescheduled" ? "rescheduled" : "done";
-  await db
-    .update(tasks)
-    .set({
-      outcome: input.outcome,
-      needsReview: false,
-      status,
-    })
-    .where(and(eq(tasks.personId, input.personId), inArray(tasks.id, closeIds)));
-  await writeActivity(db, {
-    personId: input.personId,
-    userId: input.actor.id,
-    type: "note",
-    payload: {
-      who: { id: input.actor.id, email: input.actor.email },
-      what: "task.complete",
-      when: new Date().toISOString(),
-      before: { duplicateTaskIds: closeIds },
-      after: {
-        taskIds: closeIds,
-        status,
+  if (closeIds.length > 0) {
+    await db
+      .update(tasks)
+      .set({
         outcome: input.outcome,
-        reason: "same_day_meeting",
+        needsReview: false,
+        status,
+      })
+      .where(and(eq(tasks.personId, input.personId), inArray(tasks.id, closeIds)));
+    await writeActivity(db, {
+      personId: input.personId,
+      userId: input.actor.id,
+      type: "note",
+      payload: {
+        who: { id: input.actor.id, email: input.actor.email },
+        what: "task.complete",
+        when: new Date().toISOString(),
+        before: { duplicateTaskIds: closeIds },
+        after: {
+          taskIds: closeIds,
+          status,
+          outcome: input.outcome,
+          reason: "same_day_meeting",
+        },
       },
-    },
-  });
+    });
+  }
+  if (supersedeIds.length > 0) {
+    await db
+      .update(tasks)
+      .set({
+        outcome: "rescheduled",
+        needsReview: false,
+        status: "rescheduled",
+      })
+      .where(
+        and(eq(tasks.personId, input.personId), inArray(tasks.id, supersedeIds)),
+      );
+    await writeActivity(db, {
+      personId: input.personId,
+      userId: input.actor.id,
+      type: "note",
+      payload: {
+        who: { id: input.actor.id, email: input.actor.email },
+        what: "task.complete",
+        when: new Date().toISOString(),
+        before: { duplicateTaskIds: supersedeIds },
+        after: {
+          taskIds: supersedeIds,
+          status: "rescheduled",
+          outcome: "rescheduled",
+          reason: "superseded_leftover",
+        },
+      },
+    });
+  }
 }

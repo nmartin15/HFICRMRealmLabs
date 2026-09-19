@@ -1012,6 +1012,39 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           },
         });
       }
+      if (plan.supersedeLeftoverIds.length > 0) {
+        await app.db
+          .update(tasks)
+          .set({
+            status: "rescheduled",
+            outcome: "rescheduled",
+            needsReview: false,
+          })
+          .where(
+            and(
+              eq(tasks.personId, row.id),
+              eq(tasks.status, "open"),
+              inArray(tasks.id, plan.supersedeLeftoverIds),
+            ),
+          );
+        await writeActivity(app.db, {
+          personId: row.id,
+          userId: actor.id,
+          type: "note",
+          payload: {
+            who: { id: actor.id, email: actor.email },
+            what: "task.complete",
+            when: new Date().toISOString(),
+            before: { duplicateTaskIds: plan.supersedeLeftoverIds },
+            after: {
+              taskIds: plan.supersedeLeftoverIds,
+              status: "rescheduled",
+              outcome: "rescheduled",
+              reason: "superseded_leftover",
+            },
+          },
+        });
+      }
 
       const nextStatus = plan.next
         ? plan.next.kind === "dnc"

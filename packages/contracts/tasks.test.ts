@@ -4,6 +4,8 @@ import {
   describeTaskActivity,
   hasExistingOpenFollowUp,
   isFollowUpTask,
+  isOpenMeetingSupersededByLaterOutcome,
+  latestHandSetMeetingDueAt,
   planCompleteTask,
   planCreateTask,
   planUpdateTask,
@@ -133,6 +135,7 @@ describe("planCompleteTask", () => {
       status: "done",
       outcome: null,
       closeDuplicateIds: [],
+      supersedeLeftoverIds: [],
       next: null,
     });
   });
@@ -308,6 +311,25 @@ describe("planCompleteTask", () => {
     ).toBe(true);
   });
 
+  it("does not treat an earlier leftover meeting as an existing follow-up", () => {
+    expect(
+      hasExistingOpenFollowUp({
+        currentId: "11111111-1111-4111-8111-111111111111",
+        currentKind: "meeting",
+        currentDueAt: "2026-08-24T21:00:00.000Z",
+        currentCalendarEventId: null,
+        otherOpenTasks: [
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            kind: "meeting",
+            dueAt: "2026-02-25T18:30:00.000Z",
+            calendarEventId: "evt-old",
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
   it("does not treat a same-day leftover meeting as an existing follow-up", () => {
     expect(
       hasExistingOpenFollowUp({
@@ -383,6 +405,45 @@ describe("planCompleteTask", () => {
     ).toMatchObject({
       ok: true,
       closeDuplicateIds: [],
+      supersedeLeftoverIds: [],
+      next: null,
+    });
+  });
+
+  it("supersedes earlier leftover meetings when a later call is logged", () => {
+    expect(
+      planCompleteTask({
+        currentId: "11111111-1111-4111-8111-111111111111",
+        currentKind: "meeting",
+        currentStatus: "open",
+        currentDueAt: "2026-08-24T21:00:00.000Z",
+        currentCalendarEventId: null,
+        notes: "Held",
+        outcome: "held",
+        next: undefined,
+        personDoNotContact: false,
+        personDeleted: false,
+        otherOpenTasks: [
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            kind: "meeting",
+            dueAt: "2026-02-25T18:30:00.000Z",
+            calendarEventId: "evt-old",
+          },
+          {
+            id: "33333333-3333-4333-8333-333333333333",
+            kind: "meeting",
+            dueAt: "2026-09-18T16:00:00.000Z",
+            calendarEventId: "evt-later",
+          },
+        ],
+      }),
+    ).toMatchObject({
+      ok: true,
+      status: "done",
+      outcome: "held",
+      closeDuplicateIds: [],
+      supersedeLeftoverIds: ["22222222-2222-4222-8222-222222222222"],
       next: null,
     });
   });
@@ -487,5 +548,45 @@ describe("classifyOpenTask", () => {
         payloads: [],
       }),
     ).toBe("overdue");
+  });
+});
+
+describe("leftover meeting supersede", () => {
+  it("uses the latest hand-set meeting as the cutoff", () => {
+    expect(
+      latestHandSetMeetingDueAt([
+        {
+          dueAt: "2026-08-24T21:00:00.000Z",
+          outcome: "held",
+          status: "done",
+        },
+        {
+          dueAt: "2026-09-16T16:00:00.000Z",
+          outcome: "rescheduled",
+          status: "rescheduled",
+        },
+      ]),
+    ).toBe("2026-09-16T16:00:00.000Z");
+  });
+
+  it("drops earlier leftovers after a later call is already logged", () => {
+    expect(
+      isOpenMeetingSupersededByLaterOutcome({
+        dueAt: "2026-02-25T18:30:00.000Z",
+        latestClosedDueAt: "2026-09-16T16:00:00.000Z",
+      }),
+    ).toBe(true);
+    expect(
+      isOpenMeetingSupersededByLaterOutcome({
+        dueAt: "2026-09-16T16:30:00.000Z",
+        latestClosedDueAt: "2026-09-16T16:00:00.000Z",
+      }),
+    ).toBe(true);
+    expect(
+      isOpenMeetingSupersededByLaterOutcome({
+        dueAt: "2026-09-18T16:00:00.000Z",
+        latestClosedDueAt: "2026-09-16T16:00:00.000Z",
+      }),
+    ).toBe(false);
   });
 });
