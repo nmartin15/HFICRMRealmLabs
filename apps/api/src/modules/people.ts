@@ -45,6 +45,7 @@ import {
   emailMessages,
   emailThreads,
   incubatorCards,
+  latestOpenMailEnrollment,
   listAlternateEmailsByPerson,
   people,
   personCampaignTags,
@@ -84,6 +85,7 @@ import {
   serializeEmailThreadWithMessages,
   serializePerson,
   serializeTask,
+  toIso,
 } from "../lib/serialize.js";
 import { requireUser } from "../plugins/db.js";
 import { httpError } from "../plugins/error.js";
@@ -326,7 +328,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const row = await requirePerson(app.db, req.params.id);
-      const [board, history, taskRows, snapshotRows, campaignHoldRows] = await Promise.all([
+      const [board, history, taskRows, snapshotRows, campaignHoldRows, mailEnrollment] = await Promise.all([
         personBoard(app.db, row),
         personTimeline(app.db, row, actor),
         app.db
@@ -348,6 +350,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           .from(personCampaignTags)
           .where(eq(personCampaignTags.personId, row.id))
           .limit(1),
+        latestOpenMailEnrollment(app.db, row.id),
       ]);
 
       const hold = snapshotRows[0]
@@ -368,6 +371,14 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         taskGuidePayloads: history.taskGuidePayloads,
         scoreHoldSummary: hold?.success ? hold.data.summary : null,
         campaignHold,
+        mailEnrollment: mailEnrollment
+          ? {
+              tag: mailEnrollment.tag,
+              touchIndex: mailEnrollment.touchIndex,
+              status: mailEnrollment.status,
+              dueAt: toIso(mailEnrollment.dueAt),
+            }
+          : null,
       });
     },
   );

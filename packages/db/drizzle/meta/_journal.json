@@ -141,6 +141,13 @@
       "when": 1790300001000,
       "tag": "0019_recruiter_contacts",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790400000000,
+      "tag": "0020_mail_engine",
+      "breakpoints": true
     }
   ]
 }

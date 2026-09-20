@@ -28,6 +28,7 @@ import {
   type RecruiterSpecialty,
 } from "./enums";
 import { splitName } from "./import";
+import { personMailEnrollmentSummarySchema } from "./mail-engine";
 import { personScoreSchema } from "./scoring";
 import { createTaskBodySchema, taskSchema } from "./tasks";
 import { timelineItemSchema } from "./timeline";
@@ -413,6 +414,7 @@ export const personDetailResponseSchema = z.object({
   taskGuidePayloads: z.array(activityPayloadSchema),
   scoreHoldSummary: z.string().nullable(),
   campaignHold: personCampaignHoldSchema.nullable(),
+  mailEnrollment: personMailEnrollmentSummarySchema.nullable(),
 });
 export type PersonDetailResponse = z.infer<typeof personDetailResponseSchema>;
 

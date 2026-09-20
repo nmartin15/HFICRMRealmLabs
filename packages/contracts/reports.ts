@@ -3,6 +3,7 @@ import type {
   AllocationDecision,
   AllocationStage,
   BudgetQualified,
+  ContactKind,
   MeetingOutcome,
 } from "./enums";
 import { isoDateSchema } from "./enums";
@@ -146,6 +147,7 @@ export type ReportPersonInput = {
   allocationStage: AllocationStage | null;
   allocationDecision: AllocationDecision | null;
   noCallAppLink: boolean;
+  contactKind?: ContactKind;
 };
 
 export type ReportMeetingInput = {
@@ -303,21 +305,34 @@ function row(
   };
 }
 
+function isReportCampaignLead(person: ReportPersonInput): boolean {
+  return person.contactKind !== "recruiter";
+}
+
 export function computeReport(input: ComputeReportInput): ReportResponse {
   const { range } = input;
   const linkedin = sumReportInputs(matchingReportInputs(input.periods, range));
+  const recruiterIds = new Set(
+    input.people
+      .filter((person) => !isReportCampaignLead(person))
+      .map((person) => person.id),
+  );
+  const people = input.people.filter(isReportCampaignLead);
+  const meetings = input.meetings.filter(
+    (meeting) => !recruiterIds.has(meeting.personId),
+  );
 
-  const applicants = input.people.filter((person) =>
+  const applicants = people.filter((person) =>
     dateInRange(person.appliedAt, range),
   );
 
-  const peopleById = new Map(input.people.map((person) => [person.id, person]));
+  const peopleById = new Map(people.map((person) => [person.id, person]));
 
   const peopleWithMeeting = new Set(
-    input.meetings.map((meeting) => meeting.personId),
+    meetings.map((meeting) => meeting.personId),
   );
 
-  const meetingsInRange = input.meetings.filter((meeting) => {
+  const meetingsInRange = meetings.filter((meeting) => {
     const zoned = isoToZonedDate(meeting.scheduledAt);
     return dateInRange(zoned, range);
   });

@@ -145,6 +145,7 @@ function previewPeople(rows: PersonRow[]): ImportExistingPerson[] {
     id: row.id,
     email: row.email,
     deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
+    contactKind: row.contactKind,
   }));
 }
 
@@ -180,6 +181,9 @@ async function commitRow(
 ): Promise<string | null> {
   const incoming = input.mapped.person;
   if (!incoming) {
+    return null;
+  }
+  if (input.existingPerson?.contactKind === "recruiter") {
     return null;
   }
 

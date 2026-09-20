@@ -53,6 +53,7 @@ function queuedSend(status: "queued" | "sending" | "blocked" | "sent") {
     unsubscribeToken: TOKEN,
     providerMessageId: null,
     sentAt: null,
+    replyTo: "stefano@realmlabs.co",
   };
 }
 

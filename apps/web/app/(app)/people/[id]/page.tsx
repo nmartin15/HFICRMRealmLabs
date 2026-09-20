@@ -455,6 +455,15 @@ export default function PersonRecordPage() {
             )}
           </div>
         ) : null}
+        {!isRecruiter && detail.mailEnrollment ? (
+          <p className="rounded-md border px-3 py-2 text-sm">
+            Mail {detail.mailEnrollment.status}
+            {detail.mailEnrollment.status === "scheduled" ||
+            detail.mailEnrollment.status === "queued"
+              ? ` · touch ${detail.mailEnrollment.touchIndex} due ${formatDateTime(detail.mailEnrollment.dueAt)}`
+              : ""}
+          </p>
+        ) : null}
         {person.needsReview ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
             <p>Needs review</p>

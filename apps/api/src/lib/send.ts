@@ -5,6 +5,7 @@ import {
   kickboxBlocksSend,
   outboundSendResponseSchema,
   parseKickboxResult,
+  planCampaignReplyTo,
   planOutboundSend,
   SEND_BLOCKED_CODE,
   type CampaignSendPurpose,
@@ -14,6 +15,7 @@ import {
   outboundSends,
   people,
   personConsents,
+  users,
   type Database,
 } from "@realm-labs/db";
 import { eq } from "drizzle-orm";
@@ -50,11 +52,13 @@ export async function sendEmail(
     : [];
   let emailUndeliverable = false;
   let contactKind: "contact" | "recruiter" = "contact";
+  let ownerId: string | null = null;
   if (input.personId) {
     const personRows = await db
       .select({
         emailVerificationResult: people.emailVerificationResult,
         contactKind: people.contactKind,
+        ownerId: people.ownerId,
       })
       .from(people)
       .where(eq(people.id, input.personId))
@@ -63,6 +67,7 @@ export async function sendEmail(
       parseKickboxResult(personRows[0]?.emailVerificationResult),
     );
     contactKind = personRows[0]?.contactKind ?? "contact";
+    ownerId = personRows[0]?.ownerId ?? null;
   }
   const plan = planOutboundSend({
     suppressionReason,
@@ -79,6 +84,17 @@ export async function sendEmail(
   }
 
   const emailHash = hmacSha256Hex(input.emailHashKey, toEmail);
+  let replyTo: string | null = null;
+  if (input.personId) {
+    const ownerRows = ownerId
+      ? await db
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.id, ownerId))
+          .limit(1)
+      : [];
+    replyTo = planCampaignReplyTo(ownerRows[0]?.email ?? null);
+  }
   // Enqueue is not send. The worker claims queued → sending with
   // WHERE status = queued, then calls Postmark, then marks sent
   // while the row is still sending.
@@ -93,6 +109,7 @@ export async function sendEmail(
         subject: input.subject,
         bodyText: input.bodyText,
         tag: input.tag ?? null,
+        replyTo,
       })
       .returning({ id: outboundSends.id });
     const row = inserted[0];

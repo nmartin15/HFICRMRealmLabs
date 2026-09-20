@@ -20,6 +20,7 @@ import {
 import { createHmac } from "node:crypto";
 import { and, eq, lte } from "drizzle-orm";
 import { writeActivity } from "./activity.js";
+import { applyMailEngineFromSequence } from "./mail-engine.js";
 
 export type CampaignTagEnv = {
   EMAIL_HASH_KEY: string;
@@ -214,6 +215,16 @@ export async function persistCampaignTag(
     asOf: input.asOf.toISOString(),
   });
   await postCampaignTagWebhook(env, payload);
+  try {
+    await applyMailEngineFromSequence(db, {
+      personId: input.person.id,
+      tag: planned.tag,
+      sequenceAction: planned.action,
+      asOf: input.asOf,
+    });
+  } catch {
+    // Enrollment must not fail the score write.
+  }
 }
 
 async function postCampaignTagWebhook(

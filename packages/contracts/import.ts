@@ -10,6 +10,7 @@ import {
   LEAD_TEMP_TO_OPERATOR_WARMTH,
   type LeadTemp,
   type OperatorWarmthLevel,
+  type ContactKind,
   type PersonSource,
   type SuppressionReason,
   type TaskKind,
@@ -166,6 +167,7 @@ export type ImportExistingPerson = {
   id: string;
   email: string;
   deletedAt: string | null;
+  contactKind?: ContactKind;
 };
 
 export type ImportAllocationPlan = {
@@ -840,6 +842,17 @@ export function assignImportActions(
         name,
         existingPersonId: found?.id ?? null,
         errors,
+      };
+    }
+
+    if (living && found?.contactKind === "recruiter") {
+      return {
+        rowNumber: row.rowNumber,
+        action: "skip" as const,
+        email,
+        name,
+        existingPersonId: found.id,
+        errors: ["Email matches a recruiter"],
       };
     }
 

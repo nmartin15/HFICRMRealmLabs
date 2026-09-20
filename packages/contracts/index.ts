@@ -34,6 +34,7 @@ export * from "./consent";
 export * from "./scoring";
 export * from "./signals";
 export * from "./campaign";
+export * from "./mail-engine";
 export * from "./send";
 export * from "./postmark";
 export * from "./kickbox";

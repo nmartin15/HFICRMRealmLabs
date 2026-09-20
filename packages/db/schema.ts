@@ -187,6 +187,12 @@ export const outboundSendStatusEnum = pgEnum("outbound_send_status", [
   "sending",
   "sent",
 ]);
+export const mailEnrollmentStatusEnum = pgEnum("mail_enrollment_status", [
+  "scheduled",
+  "queued",
+  "canceled",
+  "skipped",
+]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -720,13 +726,77 @@ export const outboundSends = pgTable(
     unsubscribeToken: uuid("unsubscribe_token").notNull().defaultRandom(),
     isSeed: boolean("is_seed").notNull().default(false),
     sentAt: timestamp("sent_at", { withTimezone: true, mode: "date" }),
+    replyTo: text("reply_to"),
     ...timestamps,
   },
   (table) => [
     check("outbound_sends_email_lowercase", sql`${table.toEmail} = lower(${table.toEmail})`),
+    check(
+      "outbound_sends_reply_to_lowercase",
+      sql`${table.replyTo} is null or ${table.replyTo} = lower(${table.replyTo})`,
+    ),
     uniqueIndex("outbound_sends_unsubscribe_token_unique").on(
       table.unsubscribeToken,
     ),
+  ],
+);
+
+export const mailTemplates = pgTable(
+  "mail_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    lane: campaignLaneEnum("lane").notNull(),
+    program: text("program").notNull(),
+    stage: text("stage").notNull(),
+    purpose: outboundSendPurposeEnum("purpose").notNull(),
+    subject: text("subject").notNull().default(""),
+    bodyText: text("body_text").notNull().default(""),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("mail_templates_lane_program_stage_unique").on(
+      table.lane,
+      table.program,
+      table.stage,
+    ),
+  ],
+);
+
+export const personMailEnrollments = pgTable(
+  "person_mail_enrollments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    enrollmentId: uuid("enrollment_id").notNull(),
+    tag: text("tag").notNull(),
+    touchIndex: integer("touch_index").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true, mode: "date" }).notNull(),
+    status: mailEnrollmentStatusEnum("status").notNull().default("scheduled"),
+    outboundSendId: uuid("outbound_send_id").references(() => outboundSends.id, {
+      onDelete: "set null",
+    }),
+    enrolledAt: timestamp("enrolled_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "person_mail_enrollments_touch_index",
+      sql`${table.touchIndex} in (0, 1)`,
+    ),
+    uniqueIndex("person_mail_enrollments_enrollment_touch_unique").on(
+      table.enrollmentId,
+      table.touchIndex,
+    ),
+    index("person_mail_enrollments_person_status_idx").on(
+      table.personId,
+      table.status,
+    ),
+    index("person_mail_enrollments_due_status_idx").on(table.status, table.dueAt),
   ],
 );
 
@@ -798,6 +868,7 @@ export const peopleRelations = relations(people, ({ one, many }) => ({
     fields: [people.id],
     references: [personCampaignTags.personId],
   }),
+  mailEnrollments: many(personMailEnrollments),
 }));
 
 export const personEmailsRelations = relations(personEmails, ({ one }) => ({
@@ -813,6 +884,20 @@ export const personCampaignTagsRelations = relations(personCampaignTags, ({ one 
     references: [people.id],
   }),
 }));
+
+export const personMailEnrollmentsRelations = relations(
+  personMailEnrollments,
+  ({ one }) => ({
+    person: one(people, {
+      fields: [personMailEnrollments.personId],
+      references: [people.id],
+    }),
+    outboundSend: one(outboundSends, {
+      fields: [personMailEnrollments.outboundSendId],
+      references: [outboundSends.id],
+    }),
+  }),
+);
 
 export const allocationCardsRelations = relations(allocationCards, ({ one }) => ({
   person: one(people, {

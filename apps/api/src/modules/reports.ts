@@ -70,13 +70,16 @@ export const reportRoutes: FastifyPluginAsyncZod = async (app) => {
             id: people.id,
             appliedAt: people.appliedAt,
             budgetQualified: people.budgetQualified,
+            contactKind: people.contactKind,
             allocationStage: allocationCards.stage,
             allocationDecision: allocationCards.decision,
             noCallAppLink: allocationCards.noCallAppLink,
           })
           .from(people)
           .leftJoin(allocationCards, eq(allocationCards.personId, people.id))
-          .where(isNull(people.deletedAt)),
+          .where(
+            and(isNull(people.deletedAt), eq(people.contactKind, "contact")),
+          ),
         app.db
           .select({
             id: tasks.id,
@@ -87,7 +90,11 @@ export const reportRoutes: FastifyPluginAsyncZod = async (app) => {
           .from(tasks)
           .innerJoin(people, eq(people.id, tasks.personId))
           .where(
-            and(isNull(people.deletedAt), eq(tasks.kind, "meeting")),
+            and(
+              isNull(people.deletedAt),
+              eq(people.contactKind, "contact"),
+              eq(tasks.kind, "meeting"),
+            ),
           ),
       ]);
 
@@ -95,6 +102,7 @@ export const reportRoutes: FastifyPluginAsyncZod = async (app) => {
         id: row.id,
         appliedAt: row.appliedAt,
         budgetQualified: row.budgetQualified,
+        contactKind: row.contactKind,
         allocationStage: row.allocationStage ?? null,
         allocationDecision: row.allocationDecision ?? null,
         noCallAppLink: row.noCallAppLink ?? false,

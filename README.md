@@ -41,7 +41,7 @@ Tests cover routing, report math, email matching, scoring math, suppression prec
 ## Invariants that must not drift
 
 - Operator mailboxes: `nathan@realmlabs.co` (`personal`), `stefano@realmlabs.co` (`partner`). No `application@` inbox.
-- Campaign From is `@mail.realmlabs.co` only. Enqueue is not send: drain claims `queued → sending` before Postmark. `POSTMARK_SEND_ENABLED` stays false until verify-webhook is 200 and `ALERT_WEBHOOK_URL` pages.
+- Campaign From is `@mail.realmlabs.co` only (not a CRM user). Reply-To is the contact owner, or Stefano if none. Enqueue is not send: drain claims `queued → sending` before Postmark. `POSTMARK_SEND_ENABLED` stays false until verify-webhook is 200 and `ALERT_WEBHOOK_URL` pages. Applicant mail is at most two stage touches per tag start; empty templates skip.
 - Suppression is HMAC of `canonicalEmail`, tombstone before purge. Consent (`inquiry` / `newsletter` / `stay_in_touch`) is a separate subsystem.
 - Kickbox is new website form intake only.
 - Contacts may be `contact` or `recruiter` (`quant_analyst` | `quant_developer`). Recruiter people are lead sources, not campaign leads: skip scoring, campaign tags, and outbound send. Source `recruiter` points at a recruiter person id. A recruiter cannot themselves have source `recruiter`.

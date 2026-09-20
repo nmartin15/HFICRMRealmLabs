@@ -430,6 +430,29 @@ describe("preview actions", () => {
     expect(preview[0]?.action).toBe("skip");
     expect(preview[0]?.errors).toContain("Email is suppressed");
   });
+
+  it("skips recruiter people instead of updating them as leads", () => {
+    const rows = mappedFromCsv(
+      csv([
+        {
+          Name: "QA Recruiter",
+          Email: "recruiter@example.com",
+          "Lead Temp": "hot",
+          "Application Date": "8/24/2026",
+        },
+      ]),
+    );
+    const preview = assignImportActions(rows, [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        email: "recruiter@example.com",
+        deletedAt: null,
+        contactKind: "recruiter",
+      },
+    ]);
+    expect(preview[0]?.action).toBe("skip");
+    expect(preview[0]?.errors).toContain("Email matches a recruiter");
+  });
 });
 
 describe("allocation and incubator planning", () => {

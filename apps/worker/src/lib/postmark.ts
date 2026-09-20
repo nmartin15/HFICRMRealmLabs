@@ -12,6 +12,7 @@ export type PostmarkSendInput = {
   subject: string;
   text: string;
   tag: string | null;
+  replyTo?: string | null;
   unsubscribeUrl: string;
   metadata: Record<string, string>;
 };
@@ -38,6 +39,9 @@ export async function sendWithPostmark(
       MessageStream: input.messageStream || POSTMARK_BROADCAST_STREAM,
       Tag: input.tag ?? undefined,
       Headers: [
+        ...(input.replyTo
+          ? [{ Name: "Reply-To", Value: input.replyTo }]
+          : []),
         { Name: "List-Unsubscribe", Value: `<${input.unsubscribeUrl}>` },
         {
           Name: "List-Unsubscribe-Post",

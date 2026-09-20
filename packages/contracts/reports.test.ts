@@ -256,6 +256,34 @@ describe("computeReport", () => {
     expect(rows.total_applicants).toMatchObject({ count: 2, rate: 1 });
   });
 
+  it("excludes recruiters from applicant and meeting funnel counts", () => {
+    const rows = rowMap({
+      ...baseInput(),
+      people: [
+        person({ id: "lead" }),
+        person({
+          id: "recruiter",
+          contactKind: "recruiter",
+          appliedAt: "2026-08-24",
+          allocationStage: "passed",
+          allocationDecision: "allocate",
+          budgetQualified: "heavy",
+          noCallAppLink: true,
+        }),
+      ],
+      meetings: [
+        meeting({ id: "m-lead", personId: "lead" }),
+        meeting({ id: "m-recruiter", personId: "recruiter" }),
+      ],
+    });
+    expect(rows.total_applicants).toMatchObject({ count: 1, rate: 1 });
+    expect(rows.calls_scheduled).toMatchObject({ count: 1, rate: 1 });
+    expect(rows.meetings_with_outcome).toMatchObject({ count: 1, rate: null });
+    expect(rows.no_call_app_link).toMatchObject({ count: 0, rate: 0 });
+    expect(rows.rejected).toMatchObject({ count: 0, rate: 0 });
+    expect(rows.qualified_for_allocation).toMatchObject({ count: 0, rate: 0 });
+  });
+
   it("counts calls scheduled as people in range with at least one meeting", () => {
     const rows = rowMap({
       ...baseInput(),

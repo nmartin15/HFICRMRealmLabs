@@ -31,6 +31,7 @@ import {
   type ScoreTrigger,
 } from "@realm-labs/contracts";
 import {
+  cancelMailEngineOnReply,
   decryptSecret,
   emailMessages,
   emailThreads,
@@ -377,6 +378,10 @@ async function upsertGmailThread(
       personId,
       actor: input.actor,
       when: input.lastMessageAt,
+    });
+    await cancelMailEngineOnReply(db, {
+      personId,
+      replyAt: input.lastMessageAt,
     });
   }
 

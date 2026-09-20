@@ -18,6 +18,17 @@ export {
   type ExtractedSignalInsert,
 } from "./extracted-signals";
 export {
+  applyMailEngineFromSequence,
+  cancelMailEngineOnReply,
+  cancelOpenMailEnrollments,
+  insertMailEnrollmentTouches,
+  latestOpenMailEnrollment,
+  listDueMailTouches,
+  markMailTouchQueued,
+  markMailTouchSkipped,
+  skipRemainingEnrollmentTouches,
+} from "./mail-engine";
+export {
   blockQueuedOutboundSends,
   claimOutboundSendingIfQueued,
   markOutboundSentIfSending,

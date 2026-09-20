@@ -8,7 +8,7 @@ import {
 } from "@realm-labs/contracts";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { and, eq, gt, isNotNull, isNull } from "drizzle-orm";
-import { people, personCampaignTags } from "@realm-labs/db";
+import { applyMailEngineFromSequence, people, personCampaignTags } from "@realm-labs/db";
 import { writeActivity } from "../lib/activity.js";
 import { sendEmail } from "../lib/send.js";
 import { hmacSha256Hex, secretsEqual } from "../lib/secrets.js";
@@ -202,6 +202,16 @@ export const campaignTagRoutes: FastifyPluginAsyncZod = async (app) => {
           after: { action: "start", revision },
         },
       });
+      try {
+        await applyMailEngineFromSequence(app.db, {
+          personId: row.person.id,
+          tag: updated.tag,
+          sequenceAction: "start",
+          asOf: now,
+        });
+      } catch {
+        // Release is persisted even if enrollment fails.
+      }
       const payload = campaignTagPayloadSchema.parse({
         schemaVersion: "v1",
         personId: row.person.id,

@@ -34,6 +34,7 @@ import {
 } from "@realm-labs/db";
 import { and, asc, eq, gte, lt, or, sql } from "drizzle-orm";
 import { writeActivity } from "./activity.js";
+import { enqueueDueMailTouches } from "./mail-engine.js";
 import { sendWithPostmark } from "./postmark.js";
 import type { Env } from "../env.js";
 
@@ -289,6 +290,7 @@ export async function deliverOutboundSend(
       subject: send.subject,
       text: send.bodyText,
       tag: send.tag,
+      replyTo: send.replyTo,
       unsubscribeUrl,
       metadata: {
         sendId: send.id,
@@ -479,9 +481,35 @@ async function runOutboundDrainLocked(
   if (ticks === 0) {
     return { attempted: blocked, sent: 0, halted: null, stuckSending };
   }
+  const dailyCap = dailySendCap(await warmupDayIndex(db, now));
+  const alreadySentToday = await todaySentCount(db, now);
+  await enqueueDueMailTouches(db, env, {
+    now,
+    dailyCap,
+    alreadySentToday,
+    remainingTicksInWindow: ticks,
+  });
+  const queuedAfter = await db
+    .select()
+    .from(outboundSends)
+    .where(
+      and(eq(outboundSends.status, "queued"), eq(outboundSends.isSeed, false)),
+    )
+    .orderBy(asc(outboundSends.createdAt))
+    .limit(50);
+  stillQueued.length = 0;
+  blocked = 0;
+  for (const row of queuedAfter) {
+    const prepared = await prepareQueuedSend(db, row, env.EMAIL_HASH_KEY);
+    if (prepared.ready) {
+      stillQueued.push(row);
+    } else {
+      blocked += 1;
+    }
+  }
   const budget = sendTickBudget({
-    dailyCap: dailySendCap(await warmupDayIndex(db, now)),
-    alreadySentToday: await todaySentCount(db, now),
+    dailyCap,
+    alreadySentToday,
     queued: stillQueued.length,
     remainingTicksInWindow: ticks,
   });

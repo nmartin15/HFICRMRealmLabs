@@ -191,6 +191,9 @@ function SettingsForm() {
             <Link href="/settings/scoring" className="hover:underline">
               Scoring
             </Link>
+            <Link href="/settings/mail" className="hover:underline">
+              Applicant mail
+            </Link>
             <Link href="/settings/suppressions" className="hover:underline">
               Suppressions
             </Link>
