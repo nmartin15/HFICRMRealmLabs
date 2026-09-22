@@ -1,0 +1,25 @@
+---
+description: How to ship Realm Labs CRM to production
+alwaysApply: true
+---
+
+# Production deploy
+
+Live production is **not Fly**. `realmlabscrm.com` is the DigitalOcean droplet `146.190.144.235` (`/opt/realm-labs-crm`, `docker-compose.prod.yml`). `fly.*.toml` files exist; this Fly login has no `realm-labs-crm-*` apps. Do not run `flyctl deploy` unless `flyctl apps list` actually shows those apps.
+
+When asked to push to GitHub and the cloud:
+
+1. Commit if needed. Push **both** remotes — the droplet pulls `HFICRMRealmLabs` (`hficrm`), not only `realmlabscrm` (`origin`):
+
+```powershell
+git push origin HEAD:main
+git push hficrm HEAD:main
+```
+
+2. Pull and rebuild on the droplet (API entrypoint runs migrate):
+
+```powershell
+ssh -o BatchMode=yes -o ConnectTimeout=20 root@146.190.144.235 "cd /opt/realm-labs-crm && git pull origin main && git log -1 --oneline && docker compose -f docker-compose.prod.yml up -d --build --force-recreate web api worker && docker compose -f docker-compose.prod.yml ps"
+```
+
+3. Confirm `git log -1` is the new commit and web/api/worker restarted (not still "Up 46 hours").
