@@ -44,7 +44,6 @@ function salesTag(input: {
     suppressionReason: null,
     stayInTouch: false,
     doNotContact: false,
-    newsletterGranted: false,
   });
   if (!resolved) {
     throw new Error("expected a sales tag");
@@ -78,7 +77,6 @@ describe("campaign tags", () => {
       suppressionReason: null,
       stayInTouch: false,
       doNotContact: false,
-      newsletterGranted: false,
     });
     expect(warmAt79?.tag).toBe("rl.v1.sales.incubator.applied.warm");
     expect(warmAt79?.intensity).toBe("warm");
@@ -90,7 +88,6 @@ describe("campaign tags", () => {
       suppressionReason: null,
       stayInTouch: false,
       doNotContact: false,
-      newsletterGranted: false,
     });
     expect(heldHotAt79?.intensity).toBe("hot");
   });
@@ -103,7 +100,6 @@ describe("campaign tags", () => {
       suppressionReason: null,
       stayInTouch: false,
       doNotContact: false,
-      newsletterGranted: false,
     });
     expect(resolved?.tag).toBe("rl.v1.sales.unknown.none.soft");
     expect(resolved?.intensity).toBe("soft");
@@ -118,7 +114,6 @@ describe("campaign tags", () => {
         suppressionReason: "unsubscribed",
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: true,
       }),
     ).toBeNull();
     expect(
@@ -129,12 +124,11 @@ describe("campaign tags", () => {
         suppressionReason: null,
         stayInTouch: false,
         doNotContact: true,
-        newsletterGranted: false,
       }),
     ).toBeNull();
   });
 
-  it("gives recruiter contacts no tag, including newsletter", () => {
+  it("gives recruiter contacts no tag, including stay-in-touch", () => {
     expect(
       resolveCampaignTag({
         bucket: "hot",
@@ -143,13 +137,12 @@ describe("campaign tags", () => {
         suppressionReason: null,
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: true,
         contactKind: "recruiter",
       }),
     ).toBeNull();
   });
 
-  it("limits rejected-but-interested contacts to newsletter when consented", () => {
+  it("puts closed-pipeline contacts on stay-in-touch without a newsletter grant", () => {
     expect(
       resolveCampaignTag({
         bucket: "warm",
@@ -158,9 +151,8 @@ describe("campaign tags", () => {
         suppressionReason: "rejected",
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: false,
-      }),
-    ).toBeNull();
+      })?.tag,
+    ).toBe("rl.v1.newsletter.none.none.none");
     expect(
       resolveCampaignTag({
         bucket: "hot",
@@ -169,9 +161,9 @@ describe("campaign tags", () => {
         suppressionReason: "rejected",
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: true,
-      })?.tag,
-    ).toBe("rl.v1.newsletter.none.none.none");
+        stayInTouchOptedOut: true,
+      }),
+    ).toBeNull();
   });
 
   it("maps up to start and down to stop from the editable policy table", () => {

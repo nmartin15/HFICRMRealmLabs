@@ -73,19 +73,50 @@ export function planNewsletterWithdraw(): NewsletterWithdrawPlan {
 }
 
 export type FullOptOutPlan = {
+  kind: "full_opt_out";
   suppress: true;
   reason: "unsubscribed";
   purgePerson: true;
   withdrawAll: true;
+  stayInTouchOptedOut: false;
 };
 
 export function planFullOptOut(): FullOptOutPlan {
   return {
+    kind: "full_opt_out",
     suppress: true,
     reason: "unsubscribed",
     purgePerson: true,
     withdrawAll: true,
+    stayInTouchOptedOut: false,
   };
+}
+
+export type StayInTouchOptOutPlan = {
+  kind: "stay_in_touch_opt_out";
+  suppress: false;
+  purgePerson: false;
+  stayInTouchOptedOut: true;
+  cancelMail: true;
+};
+
+export function planStayInTouchOptOut(): StayInTouchOptOutPlan {
+  return {
+    kind: "stay_in_touch_opt_out",
+    suppress: false,
+    purgePerson: false,
+    stayInTouchOptedOut: true,
+    cancelMail: true,
+  };
+}
+
+export function planCampaignUnsubscribe(
+  purpose: "sales" | "newsletter" | "value_add",
+): FullOptOutPlan | StayInTouchOptOutPlan {
+  if (purpose === "newsletter") {
+    return planStayInTouchOptOut();
+  }
+  return planFullOptOut();
 }
 
 export function hasStayInTouch(

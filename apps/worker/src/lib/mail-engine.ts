@@ -1,6 +1,5 @@
 import {
   canonicalEmail,
-  hasNewsletterGrant,
   hasStayInTouch,
   isBlankMailTemplate,
   kickboxBlocksSend,
@@ -174,7 +173,7 @@ async function enqueueOneTouch(
     purpose: template.purpose,
     stayInTouch: hasStayInTouch(consentRows),
     doNotContact: person.doNotContact,
-    newsletterGranted: hasNewsletterGrant(consentRows),
+    stayInTouchOptedOut: person.stayInTouchOptedOut,
     emailUndeliverable: kickboxBlocksSend(
       parseKickboxResult(person.emailVerificationResult),
     ),

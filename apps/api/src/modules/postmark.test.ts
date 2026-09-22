@@ -79,7 +79,10 @@ describe("unsubscribe HTTP methods", () => {
       url: `/api/unsubscribe/${TOKEN}`,
     });
     expect(res.statusCode).toBe(500);
-    expect(res.json().error.message).toBe(WRITE_ERROR);
+    expect(res.json().error).toEqual({
+      code: "INTERNAL",
+      message: "Unexpected error",
+    });
     await app.close();
   });
 });

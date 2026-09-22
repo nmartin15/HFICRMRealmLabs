@@ -227,6 +227,9 @@ export const people = pgTable(
       .default("unknown"),
     score: integer("score"),
     doNotContact: boolean("do_not_contact").notNull().default(false),
+    stayInTouchOptedOut: boolean("stay_in_touch_opted_out")
+      .notNull()
+      .default(false),
     needsReview: boolean("needs_review").notNull().default(false),
     emailVerificationResult: text("email_verification_result"),
     emailVerifiedAt: timestamp("email_verified_at", {

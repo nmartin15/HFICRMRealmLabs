@@ -10,6 +10,8 @@ import {
   planMailEngineAction,
   planMailReplyCancel,
   planMailTickEnqueueCount,
+  planStayInTouchNextDue,
+  shouldScheduleStayInTouchRenewal,
 } from "./mail-engine";
 import type { CampaignIntensity, CampaignLane } from "./campaign";
 import { MS_PER_DAY } from "./scoring";
@@ -51,7 +53,7 @@ describe("planEnrollmentTouches", () => {
     ]);
   });
 
-  it("does not bump newsletter", () => {
+  it("schedules one stay-in-touch touch per enrollment, then a 90-day renew", () => {
     expect(
       planEnrollmentTouches({
         enrolledAt,
@@ -59,6 +61,25 @@ describe("planEnrollmentTouches", () => {
         lane: "newsletter",
       }),
     ).toEqual([{ touchIndex: 0, dueAt: enrolledAt }]);
+    expect(planStayInTouchNextDue(enrolledAt)).toBe(
+      enrolledAt + 90 * MS_PER_DAY,
+    );
+    expect(
+      shouldScheduleStayInTouchRenewal({
+        purpose: "newsletter",
+        lane: "newsletter",
+        optedOut: false,
+        hasOpenTouch: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldScheduleStayInTouchRenewal({
+        purpose: "newsletter",
+        lane: "newsletter",
+        optedOut: true,
+        hasOpenTouch: false,
+      }),
+    ).toBe(false);
   });
 
   it("schedules a hot bump after 2 days and lukewarm after 5", () => {
@@ -151,7 +172,7 @@ describe("mail templates", () => {
     ).toBe("Hi Ada (Ada Lovelace) — allocation applied {{extra}}");
   });
 
-  it("includes a catalog entry per sales stage plus newsletter", () => {
+  it("includes a catalog entry per sales stage plus stay-in-touch", () => {
     expect(MAIL_TEMPLATE_CATALOG.some((row) => row.lane === "newsletter")).toBe(
       true,
     );

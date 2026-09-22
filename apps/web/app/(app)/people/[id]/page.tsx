@@ -827,6 +827,18 @@ export default function PersonRecordPage() {
           />
           <Label htmlFor="doNotContact">Do not contact</Label>
         </div>
+        <div className="flex items-center gap-2">
+          <input
+            id="stayInTouchOptedOut"
+            type="checkbox"
+            checked={!person.stayInTouchOptedOut}
+            disabled={person.doNotContact}
+            onChange={(event) =>
+              void patch({ stayInTouchOptedOut: !event.target.checked })
+            }
+          />
+          <Label htmlFor="stayInTouchOptedOut">Stay in touch mail</Label>
+        </div>
         <div className="space-y-1 sm:col-span-2">
           <Label htmlFor="owner">Owner</Label>
           <select

@@ -4,8 +4,8 @@ import {
   PURGE_STEP_ORDER,
   blocksImportUpdate,
   blocksPersonCreate,
-  isEligibleForNewsletter,
   isEligibleForSalesCampaign,
+  isEligibleForStayInTouch,
   planDoNotContactChange,
   planSuppressionWrite,
   suppressionLookupEmail,
@@ -104,7 +104,7 @@ describe("create and import blocks", () => {
 });
 
 describe("campaign eligibility", () => {
-  it("lets suppression win over score, stay-in-touch, and newsletter", () => {
+  it("lets suppression win over score, stay-in-touch, and keep-warm", () => {
     expect(
       isEligibleForSalesCampaign({
         suppressionReason: null,
@@ -135,29 +135,29 @@ describe("campaign eligibility", () => {
     ).toBe(false);
   });
 
-  it("allows newsletter for rejected and enrolled when granted", () => {
+  it("allows stay-in-touch for rejected and enrolled unless opted out", () => {
     expect(
-      isEligibleForNewsletter({
+      isEligibleForStayInTouch({
         suppressionReason: "rejected",
-        newsletterGranted: true,
+        stayInTouchOptedOut: false,
       }),
     ).toBe(true);
     expect(
-      isEligibleForNewsletter({
+      isEligibleForStayInTouch({
         suppressionReason: "enrolled",
-        newsletterGranted: true,
+        stayInTouchOptedOut: false,
       }),
     ).toBe(true);
     expect(
-      isEligibleForNewsletter({
+      isEligibleForStayInTouch({
         suppressionReason: "unsubscribed",
-        newsletterGranted: true,
+        stayInTouchOptedOut: false,
       }),
     ).toBe(false);
     expect(
-      isEligibleForNewsletter({
+      isEligibleForStayInTouch({
         suppressionReason: null,
-        newsletterGranted: false,
+        stayInTouchOptedOut: true,
       }),
     ).toBe(false);
   });

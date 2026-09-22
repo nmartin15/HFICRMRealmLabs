@@ -3,12 +3,14 @@ import {
   planEnrollmentTouches,
   planMailEngineAction,
   planMailReplyCancel,
+  planStayInTouchNextDue,
+  shouldScheduleStayInTouchRenewal,
   type CampaignSequenceAction,
 } from "@realm-labs/contracts";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, lte } from "drizzle-orm";
 import type { Database } from "./client";
-import { activities, outboundSends, personMailEnrollments } from "./schema";
+import { activities, outboundSends, people, personMailEnrollments } from "./schema";
 
 const OPEN_ENROLLMENT_STATUSES = ["scheduled", "queued"] as const;
 
@@ -195,6 +197,84 @@ async function writeMailActivity(
     },
     occurredAt: input.when,
   });
+}
+
+export async function persistStayInTouchOptOut(
+  db: Database,
+  input: { personId: string; when: Date },
+): Promise<boolean> {
+  const [updated] = await db
+    .update(people)
+    .set({ stayInTouchOptedOut: true })
+    .where(eq(people.id, input.personId))
+    .returning({ id: people.id });
+  if (!updated) {
+    return false;
+  }
+  const canceled = await cancelOpenMailEnrollments(db, input.personId);
+  await writeMailActivity(db, {
+    personId: input.personId,
+    what: "mail.stay_in_touch_opt_out",
+    when: input.when,
+    before: { stayInTouchOptedOut: false },
+    after: { stayInTouchOptedOut: true, canceled: canceled.canceled },
+  });
+  return true;
+}
+
+export async function scheduleStayInTouchRenewal(
+  db: Database,
+  input: {
+    personId: string;
+    tag: string;
+    purpose: "sales" | "newsletter" | "value_add";
+    sentAt: Date;
+    optedOut: boolean;
+  },
+): Promise<boolean> {
+  const parsed = parseCampaignTag(input.tag);
+  const open = await db
+    .select({ id: personMailEnrollments.id })
+    .from(personMailEnrollments)
+    .where(
+      and(
+        eq(personMailEnrollments.personId, input.personId),
+        inArray(personMailEnrollments.status, [...OPEN_ENROLLMENT_STATUSES]),
+      ),
+    )
+    .limit(1);
+  if (
+    !shouldScheduleStayInTouchRenewal({
+      purpose: input.purpose,
+      lane: parsed?.lane ?? null,
+      optedOut: input.optedOut,
+      hasOpenTouch: Boolean(open[0]),
+    })
+  ) {
+    return false;
+  }
+  const enrollmentId = randomUUID();
+  const dueAt = new Date(planStayInTouchNextDue(input.sentAt.getTime()));
+  await insertMailEnrollmentTouches(db, {
+    personId: input.personId,
+    enrollmentId,
+    tag: input.tag,
+    enrolledAt: input.sentAt,
+    touches: [{ touchIndex: 0, dueAt }],
+  });
+  await writeMailActivity(db, {
+    personId: input.personId,
+    what: "mail.enroll",
+    when: input.sentAt,
+    before: null,
+    after: {
+      tag: input.tag,
+      enrollmentId,
+      touches: 1,
+      reason: "stay_in_touch_renewal",
+    },
+  });
+  return true;
 }
 
 export async function applyMailEngineFromSequence(

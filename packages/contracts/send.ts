@@ -1,7 +1,7 @@
 import { canonicalEmail } from "./email-matching";
 import {
-  isEligibleForNewsletter,
   isEligibleForSalesCampaign,
+  isEligibleForStayInTouch,
   SUPPRESSION_POLICIES,
 } from "./suppression";
 import type { ContactKind, SuppressionReason } from "./enums";
@@ -34,7 +34,7 @@ export type PlanOutboundSendInput = {
   purpose: CampaignSendPurpose;
   stayInTouch: boolean;
   doNotContact: boolean;
-  newsletterGranted: boolean;
+  stayInTouchOptedOut?: boolean;
   emailUndeliverable?: boolean;
   isSeed?: boolean;
   contactKind?: ContactKind;
@@ -104,15 +104,15 @@ export function planOutboundSend(
     return { ok: true };
   }
   if (
-    !isEligibleForNewsletter({
+    !isEligibleForStayInTouch({
       suppressionReason: reason,
-      newsletterGranted: input.newsletterGranted,
+      stayInTouchOptedOut: input.stayInTouchOptedOut === true,
     })
   ) {
     return {
       ok: false,
       code: SEND_BLOCKED_CODE,
-      message: "Address is not eligible for newsletter or value-add sends",
+      message: "Address is not eligible for stay-in-touch sends",
     };
   }
   return { ok: true };

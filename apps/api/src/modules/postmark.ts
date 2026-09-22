@@ -1,23 +1,31 @@
 import {
   okResponseSchema,
+  planCampaignUnsubscribe,
+  unsubscribeConfirmCopy,
   unsubscribeHttpAction,
   unsubscribeParamsSchema,
 } from "@realm-labs/contracts";
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod";
 import { eq } from "drizzle-orm";
-import { findPersonByEmail, outboundSends, type Database } from "@realm-labs/db";
+import {
+  findPersonByEmail,
+  outboundSends,
+  persistStayInTouchOptOut,
+  type Database,
+} from "@realm-labs/db";
 import { basicAuthMatches } from "../lib/basic-auth.js";
 import { applyPostmarkWebhook } from "../lib/postmark-events.js";
 import { writeSuppression } from "../lib/suppression.js";
 import { httpError } from "../plugins/error.js";
 
-export function unsubscribeConfirmationHtml(): string {
+export function unsubscribeConfirmationHtml(purpose: "sales" | "newsletter" | "value_add" | null): string {
+  const copy = unsubscribeConfirmCopy(purpose);
   return `<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Unsubscribe</title>
+<title>${copy.title}</title>
 <body>
-  <p>Stop email from Realm Labs to this address?</p>
+  <p>${copy.prompt}</p>
   <form method="post">
     <button type="submit" autofocus>Unsubscribe</button>
   </form>
@@ -31,6 +39,7 @@ async function loadSendForUnsubscribeToken(db: Database, token: string) {
     .select({
       toEmail: outboundSends.toEmail,
       personId: outboundSends.personId,
+      purpose: outboundSends.purpose,
     })
     .from(outboundSends)
     .where(eq(outboundSends.unsubscribeToken, token))
@@ -48,6 +57,14 @@ export async function unsubscribeByToken(
     throw httpError(404, "NOT_FOUND", "Unsubscribe link is not valid");
   }
   const person = await findPersonByEmail(db, row.toEmail);
+  const plan = planCampaignUnsubscribe(row.purpose);
+  if (plan.kind === "stay_in_touch_opt_out") {
+    const personId = person?.id ?? row.personId;
+    if (personId) {
+      await persistStayInTouchOptOut(db, { personId, when: new Date() });
+    }
+    return;
+  }
   await writeSuppression(db, {
     email: row.toEmail,
     keyHex: emailHashKey,
@@ -127,7 +144,7 @@ export const postmarkRoutes: FastifyPluginAsyncZod = async (app) => {
       }
       return reply
         .type("text/html; charset=utf-8")
-        .send(unsubscribeConfirmationHtml());
+        .send(unsubscribeConfirmationHtml(row.purpose ?? null));
     },
   );
 };

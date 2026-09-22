@@ -1,6 +1,5 @@
 import {
   campaignTagPayloadSchema,
-  hasNewsletterGrant,
   hasStayInTouch,
   parseCampaignTag,
   planCampaignSequence,
@@ -83,7 +82,7 @@ export async function persistCampaignTag(
           suppressionReason: input.suppressionReason,
           stayInTouch: hasStayInTouch(consentRows),
           doNotContact: input.person.doNotContact,
-          newsletterGranted: hasNewsletterGrant(consentRows),
+          stayInTouchOptedOut: input.person.stayInTouchOptedOut === true,
           contactKind: input.person.contactKind,
         });
 

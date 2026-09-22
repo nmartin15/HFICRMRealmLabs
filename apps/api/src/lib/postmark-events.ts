@@ -10,6 +10,7 @@ import {
   findPersonByEmail,
   hmacSha256Hex,
   outboundSends,
+  persistStayInTouchOptOut,
   type Database,
 } from "@realm-labs/db";
 import { and, count, eq } from "drizzle-orm";
@@ -88,6 +89,15 @@ async function applyPlannedSuppression(
       personId: input.personId,
       payload: { messageId: input.messageId },
     });
+    return;
+  }
+  if (input.planned.kind === "stay_in_touch_opt_out") {
+    if (input.personId) {
+      await persistStayInTouchOptOut(db, {
+        personId: input.personId,
+        when: occurredAt,
+      });
+    }
     return;
   }
   if (input.planned.kind !== "soft_bounce") {
@@ -222,7 +232,8 @@ export async function applyPostmarkWebhook(
         ? "soft_bounce"
         : planned.kind === "complaint"
           ? "complaint"
-          : planned.kind === "unsubscribe"
+          : planned.kind === "unsubscribe" ||
+              planned.kind === "stay_in_touch_opt_out"
             ? "unsubscribe"
             : "delivery";
 

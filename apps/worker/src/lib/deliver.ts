@@ -4,7 +4,6 @@ import {
   dailySendCap,
   DISPLAY_TIME_ZONE,
   deliverabilityRates,
-  hasNewsletterGrant,
   hasStayInTouch,
   kickboxBlocksSend,
   parseKickboxResult,
@@ -29,6 +28,7 @@ import {
   people,
   personConsents,
   releaseOutboundSendingIfSending,
+  scheduleStayInTouchRenewal,
   withOutboundDrainLock,
   type Database,
 } from "@realm-labs/db";
@@ -81,6 +81,7 @@ async function loadDeliveryPlan(
   let doNotContact = false;
   let emailUndeliverable = false;
   let contactKind: "contact" | "recruiter" = "contact";
+  let stayInTouchOptedOut = false;
   if (send.personId) {
     const personRows = await db
       .select({
@@ -88,6 +89,7 @@ async function loadDeliveryPlan(
         deletedAt: people.deletedAt,
         emailVerificationResult: people.emailVerificationResult,
         contactKind: people.contactKind,
+        stayInTouchOptedOut: people.stayInTouchOptedOut,
       })
       .from(people)
       .where(eq(people.id, send.personId))
@@ -98,6 +100,7 @@ async function loadDeliveryPlan(
       parseKickboxResult(person?.emailVerificationResult),
     );
     contactKind = person?.contactKind ?? "contact";
+    stayInTouchOptedOut = person?.stayInTouchOptedOut === true;
   }
   const consentRows = send.personId
     ? await db
@@ -113,7 +116,7 @@ async function loadDeliveryPlan(
     purpose: send.purpose,
     stayInTouch: hasStayInTouch(consentRows),
     doNotContact,
-    newsletterGranted: hasNewsletterGrant(consentRows),
+    stayInTouchOptedOut,
     emailUndeliverable,
     isSeed: send.isSeed,
     contactKind,
@@ -363,6 +366,20 @@ export async function deliverOutboundSend(
       after: { status: "sent", providerMessageId: result.messageId },
     },
   });
+  if (send.personId && send.tag) {
+    const opted = await db
+      .select({ stayInTouchOptedOut: people.stayInTouchOptedOut })
+      .from(people)
+      .where(eq(people.id, send.personId))
+      .limit(1);
+    await scheduleStayInTouchRenewal(db, {
+      personId: send.personId,
+      tag: send.tag,
+      purpose: send.purpose,
+      sentAt: now,
+      optedOut: opted[0]?.stayInTouchOptedOut === true,
+    });
+  }
   return true;
 }
 

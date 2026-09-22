@@ -17,6 +17,9 @@ import { isCampaignFromAddress, sendTickBudget } from "./send";
 
 export const MAIL_ENGINE_MAX_TOUCHES = 2;
 
+/** Closed-pipeline keep-warm. Not a sales bump and not a newsletter. */
+export const STAY_IN_TOUCH_INTERVAL_DAYS = 90;
+
 /** Days until the single bump. null means touch 0 only. */
 export const MAIL_BUMP_DELAY_DAYS: Record<CampaignIntensity, number | null> = {
   none: null,
@@ -106,6 +109,24 @@ export function planMailReplyCancel(input: {
 
 export function isBlankMailTemplate(subject: string, bodyText: string): boolean {
   return subject.trim().length === 0 || bodyText.trim().length === 0;
+}
+
+export function planStayInTouchNextDue(sentAt: number): number {
+  return sentAt + STAY_IN_TOUCH_INTERVAL_DAYS * MS_PER_DAY;
+}
+
+export function shouldScheduleStayInTouchRenewal(input: {
+  purpose: "sales" | "newsletter" | "value_add";
+  lane: CampaignLane | null;
+  optedOut: boolean;
+  hasOpenTouch: boolean;
+}): boolean {
+  return (
+    input.purpose === "newsletter" &&
+    input.lane === "newsletter" &&
+    !input.optedOut &&
+    !input.hasOpenTouch
+  );
 }
 
 const MAIL_MERGE_TOKEN = /\{\{(name|firstName|program|stage)\}\}/g;

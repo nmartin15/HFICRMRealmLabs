@@ -20,7 +20,7 @@ describe("outbound send gate", () => {
       purpose: "newsletter",
       stayInTouch: false,
       doNotContact: false,
-      newsletterGranted: true,
+      stayInTouchOptedOut: false,
     });
     expect(blocked).toEqual({
       ok: false,
@@ -36,7 +36,7 @@ describe("outbound send gate", () => {
         purpose: "sales",
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: true,
+        stayInTouchOptedOut: false,
         contactKind: "recruiter",
       }),
     ).toEqual({
@@ -46,14 +46,14 @@ describe("outbound send gate", () => {
     });
   });
 
-  it("blocks sales to rejected-but-interested and allows newsletter with consent", () => {
+  it("blocks sales to rejected-but-interested and allows stay-in-touch unless opted out", () => {
     expect(
       planOutboundSend({
         suppressionReason: "rejected",
         purpose: "sales",
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: true,
+        stayInTouchOptedOut: false,
       }).ok,
     ).toBe(false);
     expect(
@@ -62,7 +62,7 @@ describe("outbound send gate", () => {
         purpose: "newsletter",
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: true,
+        stayInTouchOptedOut: false,
       }).ok,
     ).toBe(true);
     expect(
@@ -71,7 +71,7 @@ describe("outbound send gate", () => {
         purpose: "value_add",
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: true,
+        stayInTouchOptedOut: false,
       }).ok,
     ).toBe(true);
     expect(
@@ -80,7 +80,7 @@ describe("outbound send gate", () => {
         purpose: "newsletter",
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: false,
+        stayInTouchOptedOut: true,
       }).ok,
     ).toBe(false);
   });
@@ -92,7 +92,7 @@ describe("outbound send gate", () => {
         purpose: "sales",
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: false,
+        stayInTouchOptedOut: false,
         emailUndeliverable: true,
       }),
     ).toMatchObject({ ok: false, code: "UNDELIVERABLE" });
@@ -104,7 +104,7 @@ describe("outbound send gate", () => {
       purpose: "sales",
       stayInTouch: false,
       doNotContact: false,
-      newsletterGranted: false,
+      stayInTouchOptedOut: false,
     });
     expect(enqueue.ok).toBe(true);
 
@@ -113,7 +113,7 @@ describe("outbound send gate", () => {
       purpose: "sales",
       stayInTouch: false,
       doNotContact: false,
-      newsletterGranted: false,
+      stayInTouchOptedOut: false,
     });
     expect(dequeue).toEqual({
       ok: false,
@@ -154,7 +154,7 @@ describe("outbound send gate", () => {
         purpose: "newsletter",
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: false,
+        stayInTouchOptedOut: false,
         isSeed: true,
       }).ok,
     ).toBe(true);
@@ -164,7 +164,7 @@ describe("outbound send gate", () => {
         purpose: "newsletter",
         stayInTouch: false,
         doNotContact: false,
-        newsletterGranted: false,
+        stayInTouchOptedOut: false,
         isSeed: true,
       }),
     ).toMatchObject({ ok: false, code: SEND_BLOCKED_CODE });

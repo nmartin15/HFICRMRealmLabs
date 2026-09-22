@@ -1,6 +1,5 @@
 import {
   canonicalEmail,
-  hasNewsletterGrant,
   hasStayInTouch,
   kickboxBlocksSend,
   outboundSendResponseSchema,
@@ -53,12 +52,14 @@ export async function sendEmail(
   let emailUndeliverable = false;
   let contactKind: "contact" | "recruiter" = "contact";
   let ownerId: string | null = null;
+  let stayInTouchOptedOut = false;
   if (input.personId) {
     const personRows = await db
       .select({
         emailVerificationResult: people.emailVerificationResult,
         contactKind: people.contactKind,
         ownerId: people.ownerId,
+        stayInTouchOptedOut: people.stayInTouchOptedOut,
       })
       .from(people)
       .where(eq(people.id, input.personId))
@@ -68,13 +69,14 @@ export async function sendEmail(
     );
     contactKind = personRows[0]?.contactKind ?? "contact";
     ownerId = personRows[0]?.ownerId ?? null;
+    stayInTouchOptedOut = personRows[0]?.stayInTouchOptedOut === true;
   }
   const plan = planOutboundSend({
     suppressionReason,
     purpose: input.purpose,
     stayInTouch: hasStayInTouch(consentRows),
     doNotContact: input.doNotContact,
-    newsletterGranted: hasNewsletterGrant(consentRows),
+    stayInTouchOptedOut,
     emailUndeliverable,
     isSeed: false,
     contactKind,

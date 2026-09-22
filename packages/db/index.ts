@@ -26,6 +26,8 @@ export {
   listDueMailTouches,
   markMailTouchQueued,
   markMailTouchSkipped,
+  persistStayInTouchOptOut,
+  scheduleStayInTouchRenewal,
   skipRemainingEnrollmentTouches,
 } from "./mail-engine";
 export {

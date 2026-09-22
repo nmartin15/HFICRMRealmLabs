@@ -5,6 +5,7 @@ import {
   planConsentGrant,
   planFullOptOut,
   planNewsletterWithdraw,
+  planCampaignUnsubscribe,
 } from "./consent";
 
 describe("consent vs suppression", () => {
@@ -30,11 +31,24 @@ describe("consent vs suppression", () => {
 
   it("full opt-out unsubscribes and purges", () => {
     expect(planFullOptOut()).toEqual({
+      kind: "full_opt_out",
       suppress: true,
       reason: "unsubscribed",
       purgePerson: true,
       withdrawAll: true,
+      stayInTouchOptedOut: false,
     });
+  });
+
+  it("stay-in-touch unsubscribe stops that mail without purge", () => {
+    expect(planCampaignUnsubscribe("newsletter")).toEqual({
+      kind: "stay_in_touch_opt_out",
+      suppress: false,
+      purgePerson: false,
+      stayInTouchOptedOut: true,
+      cancelMail: true,
+    });
+    expect(planCampaignUnsubscribe("sales").kind).toBe("full_opt_out");
   });
 
   it("treats stay-in-touch as a positive grant", () => {

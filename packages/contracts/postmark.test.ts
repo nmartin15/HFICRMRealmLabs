@@ -97,6 +97,15 @@ describe("postmark webhook planner", () => {
         Recipient: "ada@example.com",
         SuppressSending: true,
         SuppressionReason: "ManualSuppression",
+        Metadata: { purpose: "newsletter" },
+      }).kind,
+    ).toBe("stay_in_touch_opt_out");
+    expect(
+      planPostmarkWebhook({
+        RecordType: "SubscriptionChange",
+        Recipient: "ada@example.com",
+        SuppressSending: true,
+        SuppressionReason: "ManualSuppression",
       }),
     ).toMatchObject({ kind: "unsubscribe", reason: "unsubscribed" });
     expect(

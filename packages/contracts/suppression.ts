@@ -235,15 +235,16 @@ export function isEligibleForSalesCampaign(
   return !SUPPRESSION_POLICIES[input.suppressionReason].blockSalesCampaigns;
 }
 
-export type NewsletterEligibilityInput = {
+export type StayInTouchEligibilityInput = {
   suppressionReason: SuppressionReason | null;
-  newsletterGranted: boolean;
+  stayInTouchOptedOut: boolean;
 };
 
-export function isEligibleForNewsletter(
-  input: NewsletterEligibilityInput,
+/** Closed-pipeline keep-warm. Not a newsletter grant. */
+export function isEligibleForStayInTouch(
+  input: StayInTouchEligibilityInput,
 ): boolean {
-  if (!input.newsletterGranted) {
+  if (input.stayInTouchOptedOut) {
     return false;
   }
   if (!input.suppressionReason) {

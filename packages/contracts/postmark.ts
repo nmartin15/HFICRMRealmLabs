@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { uuidSchema, type SuppressionReason } from "./enums";
+import type { CampaignSendPurpose } from "./campaign";
 import { canonicalEmail } from "./email-matching";
 import { SEND_SOFT_BOUNCE_SUPPRESS_AFTER } from "./send";
 import { SUPPRESSION_POLICIES } from "./suppression";
@@ -84,6 +85,11 @@ export type PlannedPostmarkAction =
       email: string;
       messageId: string | null;
       reason: Extract<SuppressionReason, "unsubscribed">;
+    }
+  | {
+      kind: "stay_in_touch_opt_out";
+      email: string;
+      messageId: string | null;
     };
 
 export function duplicatePostmarkNeedsTombstone(input: {
@@ -118,6 +124,43 @@ function eventEmail(event: PostmarkWebhookEvent): string | null {
   return canonicalEmail(raw);
 }
 
+function purposeFromMetadata(
+  event: PostmarkWebhookEvent,
+): CampaignSendPurpose | null {
+  const raw = event.Metadata?.purpose;
+  if (raw === "sales" || raw === "newsletter" || raw === "value_add") {
+    return raw;
+  }
+  return null;
+}
+
+function planUnsubscribeAction(
+  email: string,
+  messageId: string | null,
+  purpose: CampaignSendPurpose | null,
+): PlannedPostmarkAction {
+  if (purpose === "newsletter") {
+    return { kind: "stay_in_touch_opt_out", email, messageId };
+  }
+  return { kind: "unsubscribe", email, messageId, reason: "unsubscribed" };
+}
+
+export function unsubscribeConfirmCopy(purpose: CampaignSendPurpose | null): {
+  title: string;
+  prompt: string;
+} {
+  if (purpose === "newsletter") {
+    return {
+      title: "Unsubscribe",
+      prompt: "Stop stay-in-touch email from Realm Labs to this address?",
+    };
+  }
+  return {
+    title: "Unsubscribe",
+    prompt: "Stop email from Realm Labs to this address?",
+  };
+}
+
 export function planPostmarkWebhook(
   event: PostmarkWebhookEvent,
 ): PlannedPostmarkAction {
@@ -145,7 +188,7 @@ export function planPostmarkWebhook(
     if (event.SuppressionReason === "SpamComplaint") {
       return { kind: "complaint", email, messageId, reason: "complained" };
     }
-    return { kind: "unsubscribe", email, messageId, reason: "unsubscribed" };
+    return planUnsubscribeAction(email, messageId, purposeFromMetadata(event));
   }
 
   if (event.RecordType !== "Bounce") {
@@ -154,7 +197,7 @@ export function planPostmarkWebhook(
 
   const type = event.Type ?? "";
   if (type === "Unsubscribe") {
-    return { kind: "unsubscribe", email, messageId, reason: "unsubscribed" };
+    return planUnsubscribeAction(email, messageId, purposeFromMetadata(event));
   }
   if (type === "SpamComplaint" || type === "SpamNotification") {
     return { kind: "complaint", email, messageId, reason: "complained" };

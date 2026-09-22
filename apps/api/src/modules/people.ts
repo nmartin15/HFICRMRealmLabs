@@ -47,6 +47,7 @@ import {
   incubatorCards,
   latestOpenMailEnrollment,
   listAlternateEmailsByPerson,
+  cancelOpenMailEnrollments,
   people,
   personCampaignTags,
   personScoreSnapshots,
@@ -418,6 +419,7 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         programTrack?: typeof row.programTrack;
         appliedAt?: string | null;
         doNotContact?: boolean;
+        stayInTouchOptedOut?: boolean;
         needsReview?: boolean;
         notes?: string | null;
         resumeFilename?: string | null;
@@ -499,6 +501,14 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
           after.programTrack = null;
           update.programTrack = null;
         }
+      }
+      if (
+        patch.stayInTouchOptedOut !== undefined &&
+        patch.stayInTouchOptedOut !== row.stayInTouchOptedOut
+      ) {
+        before.stayInTouchOptedOut = row.stayInTouchOptedOut;
+        after.stayInTouchOptedOut = patch.stayInTouchOptedOut;
+        update.stayInTouchOptedOut = patch.stayInTouchOptedOut;
       }
       if (
         patch.needsReview !== undefined &&
@@ -682,13 +692,18 @@ export const peopleRoutes: FastifyPluginAsyncZod = async (app) => {
         after.budgetQualified !== undefined ||
         after.programTrack !== undefined ||
         after.leadTemp !== undefined ||
-        after.contactKind !== undefined
+        after.contactKind !== undefined ||
+        after.stayInTouchOptedOut !== undefined
       ) {
         await enqueuePersonScore(app.queues, {
           personId: updated.id,
           trigger: "manual_edit",
           computedBy: actor.id,
         });
+      }
+
+      if (updated.stayInTouchOptedOut && after.stayInTouchOptedOut === true) {
+        await cancelOpenMailEnrollments(app.db, updated.id);
       }
 
       return serializedPerson(app.db, updated);

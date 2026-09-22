@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
-  isEligibleForNewsletter,
   isEligibleForSalesCampaign,
+  isEligibleForStayInTouch,
 } from "./suppression";
 import {
   isoDateTimeSchema,
@@ -153,7 +153,7 @@ export type ResolveCampaignTagInput = {
   suppressionReason: SuppressionReason | null;
   stayInTouch: boolean;
   doNotContact: boolean;
-  newsletterGranted: boolean;
+  stayInTouchOptedOut?: boolean;
   contactKind?: ContactKind;
 };
 
@@ -173,11 +173,11 @@ export function resolveCampaignTag(
     return null;
   }
 
-  const newsletter = (): ResolvedCampaignTag | null => {
+  const stayInTouchLane = (): ResolvedCampaignTag | null => {
     if (
-      !isEligibleForNewsletter({
+      !isEligibleForStayInTouch({
         suppressionReason: input.suppressionReason,
-        newsletterGranted: input.newsletterGranted,
+        stayInTouchOptedOut: input.stayInTouchOptedOut === true,
       })
     ) {
       return null;
@@ -199,12 +199,12 @@ export function resolveCampaignTag(
   });
 
   if (!salesOk) {
-    return newsletter();
+    return stayInTouchLane();
   }
 
   const stage = input.stage?.trim() || "none";
   if (SALES_CLOSED_STAGES.has(stage)) {
-    return newsletter();
+    return stayInTouchLane();
   }
 
   if (!input.programTrack) {

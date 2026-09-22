@@ -110,6 +110,7 @@ export function serializePerson(
     budgetQualified: row.budgetQualified,
     score: row.score,
     doNotContact: row.doNotContact,
+    stayInTouchOptedOut: row.stayInTouchOptedOut,
     needsReview: row.needsReview,
     contactKind: row.contactKind,
     recruiterSpecialty: row.recruiterSpecialty,
